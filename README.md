@@ -2,6 +2,10 @@
 
 Monitors Synology DiskStation NAS devices via the DSM Web API (Tier 2 SDK adapter).
 
+## Documentation
+
+Full docset (overview, installing & configuring, inventory tree): [`docs/README.md`](docs/README.md).
+
 ## What it monitors
 
 | Object | Metrics | Properties |

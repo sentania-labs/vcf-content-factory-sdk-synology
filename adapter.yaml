@@ -1,13 +1,14 @@
 name: "VCF Content Factory Synology DiskStation"
 version: "1.0.0"
-build_number: 13
+build_number: 14
 adapter_kind: "synology_diskstation"
 tier: 2
 description: >
   Monitors Synology DiskStation NAS devices via the DSM Web API.
   Discovers storage pools, volumes, disks, iSCSI LUNs, NFS exports,
   and UPS. Collects capacity, performance, and health metrics.
-  Cross-endpoint joining stitches IO metrics onto the correct
-  storage objects (Tier 2 trigger: complex data-model stitching).
+  Cross-endpoint joining merges IO metrics onto the correct storage
+  objects (Tier 2 trigger: complex data-model joining). Framework v2
+  (SPI: VcfCfTester/VcfCfDiscoverer/VcfCfCollector over AdapterBase).
 entry_class: "com.vcfcf.adapters.synology.SynologyAdapter"
 released: true

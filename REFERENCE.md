@@ -1,6 +1,6 @@
 # VCF Content Factory Synology DiskStation — Reference
 
-Generated from `describe.xml` and `resources.properties` for build 1.0.0.13.
+Generated from `describe.xml` and `resources.properties` for build 1.0.0.14.
 
 ## Adapter
 

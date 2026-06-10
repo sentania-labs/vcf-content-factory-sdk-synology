@@ -3,13 +3,21 @@ package com.vcfcf.adapters.synology;
 import com.vcfcf.adapter.http.ManagedHttpClient;
 import com.vcfcf.adapter.json.SimpleJson;
 
+import com.integrien.alive.common.adapter3.Logger;
+
 import java.io.IOException;
 import java.net.http.HttpResponse;
-import java.util.logging.Logger;
 
 /**
  * Wraps the Synology DSM Web API. All calls go to /webapi/entry.cgi
  * differentiated by query parameters. Session auth via _sid query param.
+ *
+ * <p>v2: the logger is the framework instance logger supplied via
+ * {@code VcfCfAdapter.componentLogger(SynologyApiClient.class)} — a
+ * {@code com.integrien.alive.common.adapter3.Logger} wired to the adapter
+ * instance's log file and pinned to INFO. Never use {@code java.util.logging}
+ * (its records do not reach the adapter log) and never shadow the framework
+ * {@code adapterLogger()}.
  *
  * FRAMEWORK NOTE: Synology uses _sid as a query parameter, not a cookie.
  * The framework's SessionCookieAuth adds a Cookie header, which DSM may
@@ -20,18 +28,20 @@ import java.util.logging.Logger;
  */
 public final class SynologyApiClient {
 
-	private static final Logger LOG = Logger.getLogger(SynologyApiClient.class.getName());
 	private static final String SESSION_NAME = "VCFContentFactory";
 
 	private final ManagedHttpClient http;
 	private final String username;
 	private final String password;
+	private final Logger log;
 	private volatile String sid;
 
-	public SynologyApiClient(ManagedHttpClient http, String username, String password) {
+	public SynologyApiClient(ManagedHttpClient http, String username,
+			String password, Logger log) {
 		this.http = http;
 		this.username = username;
 		this.password = password;
+		this.log = log;
 	}
 
 	// --- Session management ---
@@ -48,7 +58,7 @@ public final class SynologyApiClient {
 			throw new IOException("Synology login failed: error code " + code);
 		}
 		this.sid = resp.data().get("sid").asString();
-		LOG.info("Synology login succeeded, session=" + SESSION_NAME);
+		log.info("Synology login succeeded, session=" + SESSION_NAME);
 		return this.sid;
 	}
 
@@ -58,7 +68,7 @@ public final class SynologyApiClient {
 			callRaw(synoUrl("SYNO.API.Auth", 7, "logout",
 					"session=" + SESSION_NAME));
 		} catch (Exception e) {
-			LOG.warning("Logout failed (non-fatal): " + e.getMessage());
+			log.warn("Logout failed (non-fatal): " + e.getMessage());
 		}
 		sid = null;
 	}
@@ -156,7 +166,7 @@ public final class SynologyApiClient {
 		if (!resp.isSuccess()) {
 			int code = (int) resp.get("error").get("code").asLong();
 			if (code == 106 || code == 107 || code == 119) {
-				LOG.info("Session expired (code=" + code + "), re-authenticating...");
+				log.info("Session expired (code=" + code + "), re-authenticating...");
 				invalidateSession();
 				login();
 				resp = callRaw(synoUrl(api, version, method, extra));

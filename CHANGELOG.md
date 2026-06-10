@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.0.0.17 (2026-06-10)
+
+- feat(adapter): adopt framework v2 §22 collect-path discovery (build-framework
+  task #19). VCF Ops 9.0.2 never invokes onDiscover() for adapter3-path
+  collectors, so a fresh Synology instance would heartbeat GREEN yet discover
+  zero resources indefinitely. Added `@Override protected boolean
+  discoverOnCollect() { return true; }`; extracted the build-16 getDiscoverer()
+  enumeration body into `@Override protected void enumerateResources(
+  ResourceSink sink)` (dr.addResource -> sink.accept); deleted getDiscoverer()
+  (the framework default now wires enumerateResources(dr::addResource) for the
+  onDiscover() path too — one body, no drift). Resources now register from the
+  top of every collect cycle and are visible from the cycle they are first seen.
+- fix(adapter): enumeration reuses the per-cycle Snapshot (§18), not its own API
+  calls. Because enumeration now runs every cycle, issuing the build-16
+  discoverer's standalone pulls (dsmInfo/storage/iscsiLunList/shareList/
+  per-share NFS probe/upsGet) would be redundant and rate-limit-hostile.
+  enumerateResources() now serves entirely from currentSnapshot(): NFS-export
+  gating reads the snapshot's nfsRulesByShare (a share is an export iff >0 NFS
+  rules — same predicate as build 16, no re-probe); UPS gating reads s.ups
+  (non-null iff usb_ups_connect). A snapshot refresh failure propagates
+  (unreadable is not invisible — never a silent zero-resource registration).
+- chore(adapter): resource keys byte-identical to build 16. rcOf() unchanged
+  (name/kind/idKey/idValue order and values identical), so the 25 existing
+  devel resources de-duplicate by identifying identifier and do NOT duplicate.
+  No metric/property keys, resource kinds, identifiers, relationships, or
+  redaction/contract-assert behavior changed.
+- fix(framework): pick up framework d59785a (rebuilt vcfcf-adapter-base.jar
+  bundled in this pak). Three fixes directly affect Synology: (1)
+  RelationshipBuilder ResourceKey arg-order swap fixed — Synology's v2
+  relationship edges now persist for the first time (prior v2 builds emitted
+  edges whose adapterKind field carried the display name and never compareTo-
+  matched a registered resource); (2) ForeignResourceResolver had the same swap
+  (line 240) — the build-16 Datastore cross-link's VMWARE/Datastore keys are now
+  matchable; (3) ManagedHttpClient.sendWithRoundRobin no longer sets the
+  JDK-forbidden Host header that crashed Synology 3036 on multi-homed NAS paths
+  since ~06-07 ("restricted header name: Host" -> HttpTimeoutException). No
+  adapter source change for (3) — Synology sets no HTTP headers and wires no
+  AuthStrategy; the fix is entirely in the bundled framework jar.
+
 ## 1.0.0.16 (2026-06-10)
 
 - feat(adapter): restore the v1 informational Datastore cross-link over the v2

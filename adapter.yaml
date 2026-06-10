@@ -1,6 +1,6 @@
 name: "VCF Content Factory Synology DiskStation"
 version: "1.0.0"
-build_number: 16
+build_number: 17
 adapter_kind: "synology_diskstation"
 tier: 2
 description: >
@@ -9,6 +9,7 @@ description: >
   and UPS. Collects capacity, performance, and health metrics.
   Cross-endpoint joining merges IO metrics onto the correct storage
   objects (Tier 2 trigger: complex data-model joining). Framework v2
-  (SPI: VcfCfTester/VcfCfDiscoverer/VcfCfCollector over AdapterBase).
+  (SPI: VcfCfTester/VcfCfCollector over AdapterBase; collect-path
+  discovery via enumerateResources + discoverOnCollect, §22).
 entry_class: "com.vcfcf.adapters.synology.SynologyAdapter"
 released: true

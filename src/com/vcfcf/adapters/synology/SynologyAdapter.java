@@ -5,8 +5,8 @@ import com.vcfcf.adapter.http.HttpClientBuilder;
 import com.vcfcf.adapter.http.ManagedHttpClient;
 import com.vcfcf.adapter.json.SimpleJson;
 import com.vcfcf.adapter.retry.RetryPolicy;
+import com.vcfcf.adapter.spi.ResourceSink;
 import com.vcfcf.adapter.spi.VcfCfCollector;
-import com.vcfcf.adapter.spi.VcfCfDiscoverer;
 import com.vcfcf.adapter.spi.VcfCfTester;
 import com.vcfcf.adapter.stitch.RelationshipBuilder;
 import com.vcfcf.adapter.stitch.SuiteApiStitcher;
@@ -34,8 +34,9 @@ import java.util.Map;
  * <p><b>v1 → v2 SPI port.</b> Re-homed from aria-ops-core
  * ({@code UnlicensedAdapter} + {@code com.vmware.tvs.*}) onto
  * {@link VcfCfAdapter} (which extends {@code AdapterBase} directly) and the
- * {@code com.vcfcf.adapter.spi} roles: {@link VcfCfTester},
- * {@link VcfCfDiscoverer}, {@link VcfCfCollector}. No {@code com.vmware.tvs.*},
+ * {@code com.vcfcf.adapter.spi} roles: {@link VcfCfTester}, collect-path
+ * discovery ({@link #enumerateResources}), {@link VcfCfCollector}. No
+ * {@code com.vmware.tvs.*},
  * no {@code Resource}/{@code ResourceCollection}, no JAX-WS. Transport is the
  * framework {@link ManagedHttpClient} over the existing DSM Web API client
  * ({@link SynologyApiClient}); auth/session logic carries over functionally.
@@ -232,97 +233,113 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	}
 
 	// -----------------------------------------------------------------------
-	// getDiscoverer — enumerate the Synology resource tree
+	// Collect-path discovery (framework v2 §22). VCF Ops 9.0.2 never invokes
+	// onDiscover() for adapter3-path collectors, so a fresh instance would
+	// heartbeat GREEN yet sit at zero resources forever (build-framework #18).
+	// Opting in drives enumeration from the top of every collect cycle; the
+	// platform de-duplicates by identifying identifier, so the 25 existing
+	// devel resources do NOT duplicate (rcOf order/values unchanged from b16).
+	// The framework default getDiscoverer() also calls enumerateResources, so
+	// onDiscover() stays wired for platforms that do call it — no drift.
 	// -----------------------------------------------------------------------
 
 	@Override
-	protected VcfCfDiscoverer<SynologyConfig> getDiscoverer() {
-		return (cfg, http, param, dr) -> {
-			logInfo("SynologyAdapter discover: starting resource enumeration");
-			api.ensureSession();
+	protected boolean discoverOnCollect() {
+		return true;
+	}
 
-			// World singleton
-			dr.addResource(rcOf("SynologyWorld", "Synology World",
-					"world_id", "synology_world"));
+	/**
+	 * Enumerate the Synology resource tree. Driven from the collect path every
+	 * cycle (§22) and from {@code onDiscover()} (framework default) — one body,
+	 * no drift.
+	 *
+	 * <p><b>Snapshot reuse (§18).</b> Enumeration now runs each collect cycle, so
+	 * it must NOT issue its own API calls. It serves entirely from the per-cycle
+	 * {@link #currentSnapshot()} — the same immutable pull the per-resource
+	 * collectors use. The snapshot already computes the NFS-export gating
+	 * ({@code nfsRulesByShare}: a share is an export iff it has &gt;0 NFS rules)
+	 * and the UPS gating ({@code s.ups} non-null iff {@code usb_ups_connect}),
+	 * so the resource set enumerated here is byte-identical to build 16's
+	 * discoverer output without re-probing.
+	 *
+	 * <p><b>Unreadable is not invisible.</b> A snapshot refresh failure throws
+	 * out of {@code currentSnapshot()} and propagates; the framework treats a
+	 * thrown enumeration as a non-fatal rediscovery failure (WARN, keep the
+	 * existing resource set) — never a silent zero-resource registration.
+	 */
+	@Override
+	protected void enumerateResources(ResourceSink sink)
+			throws InterruptedException, Exception {
+		Snapshot s = currentSnapshot();
 
-			// Diskstation singleton
-			SimpleJson dsmInfo = api.dsmInfo();
-			String serial = dsmInfo.data().get("serial").asString("unknown");
-			String model = dsmInfo.data().get("model").asString("");
-			String dsName = model.isEmpty() ? serial : model + " " + serial;
-			dr.addResource(rcOf("SynologyDiskstation", dsName, "serial", serial));
+		// World singleton
+		sink.accept(rcOf("SynologyWorld", "Synology World",
+				"world_id", "synology_world"));
 
-			SimpleJson storage = api.storageLoadInfo();
-			int pools = 0, volumes = 0, disks = 0, caches = 0, luns = 0, exports = 0;
+		// Diskstation singleton
+		String serial = s.dsmInfo.data().get("serial").asString("unknown");
+		String model = s.dsmInfo.data().get("model").asString("");
+		String dsName = model.isEmpty() ? serial : model + " " + serial;
+		sink.accept(rcOf("SynologyDiskstation", dsName, "serial", serial));
 
-			for (SimpleJson pool : storage.data().get("storagePools").asList()) {
-				dr.addResource(rcOf("SynologyStoragePool", poolDisplayName(pool),
-						"pool_id", pool.get("id").asString()));
-				pools++;
+		SimpleJson storage = s.storage;
+		int pools = 0, volumes = 0, disks = 0, caches = 0, luns = 0, exports = 0;
+
+		for (SimpleJson pool : storage.data().get("storagePools").asList()) {
+			sink.accept(rcOf("SynologyStoragePool", poolDisplayName(pool),
+					"pool_id", pool.get("id").asString()));
+			pools++;
+		}
+		for (SimpleJson vol : storage.data().get("volumes").asList()) {
+			String volPath = vol.get("vol_path").asString();
+			sink.accept(rcOf("SynologyVolume", volumeDisplayName(vol),
+					"volume_id", vol.get("volume_id").asString(volPath)));
+			volumes++;
+		}
+		for (SimpleJson disk : storage.data().get("disks").asList()) {
+			String diskId = disk.get("id").asString();
+			sink.accept(rcOf("SynologyDisk", disk.get("name").asString(diskId),
+					"disk_id", diskId));
+			disks++;
+		}
+		SimpleJson ssdCaches = storage.data().get("ssdCaches");
+		if (!ssdCaches.isNull()) {
+			for (SimpleJson cache : ssdCaches.asList()) {
+				sink.accept(rcOf("SynologySsdCache",
+						cacheDisplayName(cache, storage),
+						"cache_id", cache.get("id").asString()));
+				caches++;
 			}
-			for (SimpleJson vol : storage.data().get("volumes").asList()) {
-				String volPath = vol.get("vol_path").asString();
-				dr.addResource(rcOf("SynologyVolume", volumeDisplayName(vol),
-						"volume_id", vol.get("volume_id").asString(volPath)));
-				volumes++;
-			}
-			for (SimpleJson disk : storage.data().get("disks").asList()) {
-				String diskId = disk.get("id").asString();
-				dr.addResource(rcOf("SynologyDisk", disk.get("name").asString(diskId),
-						"disk_id", diskId));
-				disks++;
-			}
-			SimpleJson ssdCaches = storage.data().get("ssdCaches");
-			if (!ssdCaches.isNull()) {
-				for (SimpleJson cache : ssdCaches.asList()) {
-					dr.addResource(rcOf("SynologySsdCache",
-							cacheDisplayName(cache, storage),
-							"cache_id", cache.get("id").asString()));
-					caches++;
-				}
-			}
+		}
 
-			SimpleJson lunList = api.iscsiLunList();
-			for (SimpleJson lun : lunList.data().get("luns").asList()) {
-				String uuid = lun.get("uuid").asString();
-				dr.addResource(rcOf("SynologyIscsiLun",
-						lun.get("name").asString(uuid), "lun_uuid", uuid));
-				luns++;
-			}
+		for (SimpleJson lun : s.lunList.data().get("luns").asList()) {
+			String uuid = lun.get("uuid").asString();
+			sink.accept(rcOf("SynologyIscsiLun",
+					lun.get("name").asString(uuid), "lun_uuid", uuid));
+			luns++;
+		}
 
-			SimpleJson shares = api.shareList();
-			for (SimpleJson share : shares.data().get("shares").asList()) {
-				String name = share.get("name").asString();
-				try {
-					SimpleJson rules = api.nfsSharePrivilege(name);
-					if (rules.data().get("rule").size() > 0) {
-						dr.addResource(rcOf("SynologyNfsExport", name,
-								"share_name", name));
-						exports++;
-					}
-				} catch (Exception e) {
-					logWarn("Discover: NFS rule probe failed for share " + name
-							+ ": " + e.getMessage());
-				}
+		// NFS exports: a share is an export iff the snapshot kept >0 NFS rules
+		// for it (nfsRulesByShare). Same gating as build 16's per-share probe,
+		// served from the snapshot — no re-probe.
+		for (SimpleJson share : s.shares.data().get("shares").asList()) {
+			String name = share.get("name").asString();
+			if (s.nfsRulesByShare.containsKey(name)) {
+				sink.accept(rcOf("SynologyNfsExport", name, "share_name", name));
+				exports++;
 			}
+		}
 
-			// UPS (optional)
-			try {
-				SimpleJson ups = api.upsGet();
-				if (ups.data().get("usb_ups_connect").asBoolean()) {
-					String upsModel = ups.data().get("model").asString("UPS");
-					dr.addResource(rcOf("SynologyUps", upsModel,
-							"ups_model", upsModel));
-				}
-			} catch (Exception e) {
-				logInfo("Discover: UPS not available: " + e.getMessage());
-			}
+		// UPS (optional): present in the snapshot only when usb_ups_connect=true.
+		if (s.ups != null) {
+			String upsModel = s.ups.data().get("model").asString("UPS");
+			sink.accept(rcOf("SynologyUps", upsModel, "ups_model", upsModel));
+		}
 
-			logInfo("Synology discover: 1 world, 1 diskstation, " + pools
-					+ " pools, " + volumes + " volumes, " + disks + " disks, "
-					+ caches + " ssd-caches, " + luns + " luns, " + exports
-					+ " nfs-exports");
-		};
+		logInfo("Synology enumerate: 1 world, 1 diskstation, " + pools
+				+ " pools, " + volumes + " volumes, " + disks + " disks, "
+				+ caches + " ssd-caches, " + luns + " luns, " + exports
+				+ " nfs-exports");
 	}
 
 	private ResourceConfig rcOf(String kind, String name, String idKey, String idValue) {

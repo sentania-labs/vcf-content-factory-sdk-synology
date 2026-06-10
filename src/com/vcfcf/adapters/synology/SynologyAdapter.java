@@ -9,6 +9,7 @@ import com.vcfcf.adapter.spi.VcfCfCollector;
 import com.vcfcf.adapter.spi.VcfCfDiscoverer;
 import com.vcfcf.adapter.spi.VcfCfTester;
 import com.vcfcf.adapter.stitch.RelationshipBuilder;
+import com.vcfcf.adapter.stitch.SuiteApiStitcher;
 
 import com.integrien.alive.common.adapter3.AdapterBase;
 import com.integrien.alive.common.adapter3.MetricData;
@@ -39,20 +40,26 @@ import java.util.Map;
  * framework {@link ManagedHttpClient} over the existing DSM Web API client
  * ({@link SynologyApiClient}); auth/session logic carries over functionally.
  *
- * <p><b>No metric stitching; informational Datastore cross-link deferred.</b>
- * Synology pushes no metrics/properties onto foreign VMWARE resources (golden
- * baseline §3 confirms: zero Synology-namespaced data on any HostSystem or
- * Datastore). v1 did, however, emit an <em>informational</em>
- * {@code relationships|Datastore_parent} cross-link onto its own iSCSI-LUN and
- * NFS-Export resources, resolved by Datastore {@code DataStrorePath} (NAA
- * transform for LUNs, {@code ip/serverPath} for NFS — path identity, never
- * MOID), via {@code ForeignResourceResolver.loadAll("VMWARE","Datastore",...)}.
- * That path requires a Suite API client on the collect path
- * ({@code SuiteApiBridge} / {@code SuiteApiStitchClient}) — a stitch transport
- * this adapter otherwise does not have — so restoring it is a design decision
- * deferred to the orchestrator (review WARNING-1, build 15); it is NOT wired
- * silently here. Parity bar is the 25 own resources / 136 metrics in the golden
- * baseline.
+ * <p><b>No metric stitching; informational Datastore cross-link restored
+ * (build 16).</b> Synology pushes no metrics/properties onto foreign VMWARE
+ * resources (golden baseline §3 confirms: zero Synology-namespaced data on any
+ * HostSystem or Datastore). It does, however, emit v1's <em>informational</em>
+ * Datastore cross-link: each iSCSI LUN / NFS Export that backs a real VMWARE
+ * Datastore becomes a child of that Datastore (Datastore → LUN/export), so the
+ * Datastore's existing HostSystem/VM edges light up the storage dependency
+ * graph for free. The Datastore is resolved by its path identity
+ * ({@code DataStrorePath}; NAA transform for LUNs, {@code ip/serverPath} for
+ * NFS — never a MOID) via {@code ForeignResourceResolver.loadAll("VMWARE",
+ * "Datastore","DataStrorePath")} over the ambient {@link SuiteApiStitcher}
+ * (see {@link SynologyStitcher}). This carries v1's exact optional semantics:
+ * v1's {@code stitchDatastores} was already gated on Suite API availability, so
+ * a remote collector with no {@code maintenanceuser.properties} simply WARNs
+ * once and proceeds — all 25 resources still collect; collection is never
+ * failed over the optional cross-link. Unlike v1 it resolves against real
+ * inventory rather than minting phantom Datastore keys: zero matches on a
+ * working connection is legitimate (no VMware datastore backed by this NAS).
+ * Parity bar is the 25 own resources / 103 metric-property keys in the golden
+ * baseline (unchanged by this build).
  *
  * <p><b>Per-resource collect reshape.</b> v2 calls {@code collect(rc)} once per
  * discovered resource (not once for the whole topology like v1). To preserve v1's
@@ -73,6 +80,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	private static final String ADAPTER_KIND = "synology_diskstation";
 
 	private volatile SynologyApiClient api;
+
+	/**
+	 * Ambient Suite API transport for the optional Datastore cross-link, and the
+	 * Synology-specific resolver over it. Both null when the Suite API is
+	 * unavailable (remote collector with no {@code maintenanceuser.properties}) —
+	 * the cross-link is then skipped for the cycle and collection proceeds.
+	 */
+	private volatile SuiteApiStitcher suiteStitcher;
+	private volatile SynologyStitcher stitcher;
 
 	/**
 	 * Per-cycle snapshot of the Synology API responses, shared across all
@@ -113,8 +129,30 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				componentLogger(SynologyApiClient.class));
 		this.snapshot = null;
 
+		// Optional Datastore cross-link transport (build 16). Ambient mode —
+		// no describe.xml credential fields, matching v1's zero-config stitch.
+		// create() reads maintenanceuser.properties and targets
+		// https://localhost/suite-api; on a remote collector that file is absent
+		// and create() throws IllegalStateException. v1's stitchDatastores was
+		// itself gated on Suite API availability, so we degrade exactly as v1
+		// did: WARN once, leave stitcher null, and let the cycle complete with
+		// all 25 resources collecting normally and only the cross-link skipped.
+		try {
+			this.suiteStitcher = SuiteApiStitcher.create(this,
+					componentLogger(SuiteApiStitcher.class));
+			this.stitcher = new SynologyStitcher(this.suiteStitcher,
+					componentLogger(SynologyStitcher.class));
+		} catch (RuntimeException e) {
+			this.suiteStitcher = null;
+			this.stitcher = null;
+			logWarn("Datastore cross-link skipped — Suite API unavailable "
+					+ "(remote collector without maintenanceuser.properties?): "
+					+ e.getMessage());
+		}
+
 		logInfo("SynologyAdapter configured: host=" + cfg.host
-				+ " port=" + cfg.port + " allowInsecure=" + cfg.allowInsecure);
+				+ " port=" + cfg.port + " allowInsecure=" + cfg.allowInsecure
+				+ " datastoreCrossLink=" + (stitcher != null));
 	}
 
 	private SynologyConfig buildConfig(ResourceConfig rc) {
@@ -851,9 +889,83 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					"ups_model", upsModel));
 		}
 
+		// --- Optional Datastore cross-link (build 16, v1 parity) ---
+		// Resolve real VMWARE Datastores by DataStrorePath and make each LUN /
+		// NFS export a child of the Datastore that backs it. Skipped silently
+		// when the Suite API transport is unavailable (stitcher == null).
+		emitDatastoreCrossLink(rb, s);
+
 		logInfo("Relationships built: internal World>Diskstation>Pool>"
-				+ "Volume>{LUN,NFS,SSDCache,Disk} tree (no foreign stitching)");
+				+ "Volume>{LUN,NFS,SSDCache,Disk} tree"
+				+ (stitcher != null ? " + Datastore cross-link" : ""));
 		return rb.build();
+	}
+
+	/**
+	 * Emit v1's informational {@code Datastore → {LUN, NFS export}} cross-link.
+	 *
+	 * <p>Loads the real VMWARE Datastores once (cached by the resolver), then for
+	 * each iSCSI LUN computes its VMFS extent path ({@code "VMFS:|naa...|"}) and
+	 * for each NFS export computes one {@code <ip>/<volPath>/<share>} path per
+	 * connected NAS IP; a {@code DataStrorePath} that resolves to an existing
+	 * Datastore yields a {@code parentForeign(datastore, child)} edge. No match
+	 * means no edge (no phantom Datastore). All counts are logged at INFO.
+	 *
+	 * <p>No-op when {@code stitcher == null} (Suite API unavailable). Any failure
+	 * is caught and logged WARN — the internal topology already built must still
+	 * be returned, so a cross-link fault never costs the cycle its relationships.
+	 */
+	private void emitDatastoreCrossLink(RelationshipBuilder rb, Snapshot s) {
+		SynologyStitcher st = this.stitcher;
+		if (st == null) return;
+		try {
+			int datastoreCount = st.loadDatastores();
+			int lunMatches = 0;
+			int nfsMatches = 0;
+
+			// iSCSI LUN → Datastore via NAA transform.
+			for (SimpleJson lun : s.lunList.data().get("luns").asList()) {
+				String uuid = lun.get("uuid").asString();
+				if (uuid == null || uuid.isEmpty()) continue;
+				String path = SynologyStitcher.lunDataStorePath(uuid);
+				ResourceKey ds = st.matchByPath(path);
+				if (ds == null) continue;
+				ResourceKey lunKey = rb.resource("SynologyIscsiLun",
+						lun.get("name").asString(uuid), "lun_uuid", uuid);
+				rb.parentForeign(ds, lunKey);
+				lunMatches++;
+			}
+
+			// NFS Export → Datastore via <nas_ip>/<volPath>/<share> path. NAS IPs
+			// come from the per-cycle snapshot's networkInterfaces (no live call).
+			List<String> nasIps =
+					SynologyStitcher.connectedNasIps(s.networkInterfaces);
+			for (SimpleJson share : s.shares.data().get("shares").asList()) {
+				String name = share.get("name").asString();
+				SimpleJson rules = s.nfsRulesByShare.get(name);
+				if (rules == null || rules.data().get("rule").size() == 0) continue;
+				String volPath = share.get("vol_path").asString("");
+				ResourceKey exportKey = null;
+				for (String ip : nasIps) {
+					String path = SynologyStitcher.nfsDataStorePath(ip, volPath, name);
+					ResourceKey ds = st.matchByPath(path);
+					if (ds == null) continue;
+					if (exportKey == null) {
+						exportKey = rb.resource("SynologyNfsExport", name,
+								"share_name", name);
+					}
+					rb.parentForeign(ds, exportKey);
+					nfsMatches++;
+				}
+			}
+
+			logInfo("Datastore cross-link: " + datastoreCount
+					+ " datastores loaded, " + lunMatches + " LUN matches, "
+					+ nfsMatches + " NFS matches");
+		} catch (Exception e) {
+			logWarn("Datastore cross-link failed (internal topology unaffected): "
+					+ e.getMessage());
+		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -886,6 +998,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	public void onDiscard() {
 		SynologyApiClient a = this.api;
 		if (a != null) a.logout();
+		SuiteApiStitcher s = this.suiteStitcher;
+		if (s != null) s.discard();
+		this.suiteStitcher = null;
+		this.stitcher = null;
 		this.snapshot = null;
 		super.onDiscard();
 	}

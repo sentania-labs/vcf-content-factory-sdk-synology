@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.0.0.16 (2026-06-10)
+
+- feat(adapter): restore the v1 informational Datastore cross-link over the v2
+  Suite API transport (review WARNING-1, build-15 deferral — now decided).
+  Each iSCSI LUN / NFS export that backs a real VMWARE Datastore becomes a
+  child of that Datastore (Datastore -> LUN/export), so the Datastore's
+  existing HostSystem/VM edges light up the storage dependency graph for free.
+  Resolution is by path identity (DataStrorePath), never a MOID:
+    - iSCSI LUN: v1's synologyUuidToNaa transform, byte-for-byte — split the
+      LUN UUID on '-', rejoin with a 'd' separator, prefix the Type-6 OUI
+      "naa.6001405", truncate to a 25-char tail, wrap as "VMFS:|<naa>|".
+    - NFS export: "<nas_ip>/<volPath-without-leading-slash>/<share>", one key
+      per connected NAS IP (covers round-robin / multi-homed mounts). NAS IPs
+      come from the per-cycle Snapshot.networkInterfaces (no new live call).
+  Resolution uses ForeignResourceResolver.loadAll("VMWARE","Datastore",
+  "DataStrorePath") over a SuiteApiBridge backed by the ambient
+  SuiteApiStitcher (new SynologyStitcher helper).
+- feat(adapter): v1's exact optional semantics. The stitcher is created in
+  ambient mode (no describe.xml credential fields; matches v1's zero-config
+  stitch). On a remote collector with no maintenanceuser.properties,
+  SuiteApiStitcher.create() throws -> WARN once ("Datastore cross-link skipped
+  — Suite API unavailable"), stitcher stays null, and the cycle completes with
+  all 25 resources collecting normally and only the cross-link omitted.
+  Collection is never failed over the optional cross-link. Stitcher discarded
+  in onDiscard (compliance pattern).
+- fix(adapter): resolve against real inventory, not phantom Datastores. v1
+  minted bare VMWARE/Datastore keys from the computed path even when no VMware
+  datastore existed; build 16 emits an edge only when the computed
+  DataStrorePath matches a Datastore actually in inventory. Zero datastores
+  loaded on a working Suite API connection is legitimate (no VMware datastore
+  backed by this NAS) — logged at INFO, never WARN spam. Resolved/matched
+  counts logged: "Datastore cross-link: N datastores loaded, M LUN matches,
+  K NFS matches".
+- chore(adapter): parity preserved — zero changes to the 103 metric/property
+  keys, resource kinds, identifiers, or the build-15 redaction/contract-assert
+  work. pak-compare vs 1.0.0.15: 0 BLOCKING / 0 WARNING / 0 INFO (the
+  cross-link is jar-internal Java behavior; the foreign Datastore is VMWARE's
+  resource kind, never declared in this adapter's describe.xml).
+
 ## 1.0.0.15 (2026-06-10)
 
 - fix(adapter): redact secrets from thrown/logged messages. SynologyApiClient
@@ -16,11 +55,6 @@
   instead of publishing cpu_load_1m=0.0 / system_temp=0.0 sentinels on a GREEN
   instance (unreadable-is-not-readable; review NIT-1). DSM contract: a healthy
   getinfo always carries model; a healthy Utilization.get always carries cpu.
-- note(adapter): the v1 informational Datastore_parent cross-link on LUN/NFS
-  resources is NOT restored in this build — a clean restore requires a Suite
-  API client on the collect path (ForeignResourceResolver needs a SuiteApiBridge
-  / SuiteApiStitchClient), a stitch-transport dependency synology otherwise does
-  not have. Deferred to the orchestrator as a design decision (review WARNING-1).
 - chore(adapter): build_number 15; byte-identical pak structure vs build 14
   (changes are jar-internal — pak-compare 0/0/0 vs 1.0.0.14).
 
@@ -42,7 +76,7 @@
   on foreign VMWARE resources (golden baseline §3); the informational
   Datastore_parent cross-link on LUN/NFS resources is also dropped here, since
   ForeignResourceResolver/stitchDatastores required a SuiteAPI client that v2
-  does not carry. No SuiteApiStitcher added.
+  does not carry. No SuiteApiStitcher added. (Restored in build 16.)
 - fix(adapter): SynologyApiClient logger is now the framework instance Logger
   via componentLogger(SynologyApiClient.class) (was java.util.logging, whose
   records never reached the adapter log) — framework_v2_migration.md §15.

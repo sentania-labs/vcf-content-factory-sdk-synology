@@ -20,6 +20,7 @@ import com.integrien.alive.common.adapter3.config.ResourceConfig;
 import com.integrien.alive.common.adapter3.config.ResourceIdentifierConfig;
 import com.integrien.alive.common.util.CommonConstants.ResourceStatusEnum;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -38,11 +39,20 @@ import java.util.Map;
  * framework {@link ManagedHttpClient} over the existing DSM Web API client
  * ({@link SynologyApiClient}); auth/session logic carries over functionally.
  *
- * <p><b>No stitching.</b> Synology v1 has no foreign-resource stitching (golden
- * baseline §3 confirms: zero Synology-namespaced data on any VMWARE resource).
- * The v1 {@code ForeignResourceResolver}/{@code stitchDatastores} path produced
- * no landing data and is dropped — no {@code SuiteApiStitcher}. Parity bar is the
- * 25 own resources / 136 metrics in the golden baseline.
+ * <p><b>No metric stitching; informational Datastore cross-link deferred.</b>
+ * Synology pushes no metrics/properties onto foreign VMWARE resources (golden
+ * baseline §3 confirms: zero Synology-namespaced data on any HostSystem or
+ * Datastore). v1 did, however, emit an <em>informational</em>
+ * {@code relationships|Datastore_parent} cross-link onto its own iSCSI-LUN and
+ * NFS-Export resources, resolved by Datastore {@code DataStrorePath} (NAA
+ * transform for LUNs, {@code ip/serverPath} for NFS — path identity, never
+ * MOID), via {@code ForeignResourceResolver.loadAll("VMWARE","Datastore",...)}.
+ * That path requires a Suite API client on the collect path
+ * ({@code SuiteApiBridge} / {@code SuiteApiStitchClient}) — a stitch transport
+ * this adapter otherwise does not have — so restoring it is a design decision
+ * deferred to the orchestrator (review WARNING-1, build 15); it is NOT wired
+ * silently here. Parity bar is the 25 own resources / 136 metrics in the golden
+ * baseline.
  *
  * <p><b>Per-resource collect reshape.</b> v2 calls {@code collect(rc)} once per
  * discovered resource (not once for the whole topology like v1). To preserve v1's
@@ -929,6 +939,26 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			s.networkInterfaces = api.networkInterfaceList();
 			s.connections = api.currentConnections();
 			s.shares = api.shareList();
+
+			// NIT-1 (build-15): contract-assert one required field on the two
+			// critical endpoints that drive the diskstation singleton's metrics.
+			// SimpleJson is null-tolerant (asDouble()->0.0), so a "success-shaped
+			// but empty" {success:true,data:{}} payload would otherwise publish
+			// cpu_load_1m=0.0 / system_temp=0.0 sentinels on a GREEN instance
+			// (empty-as-readable). DSM contract: a healthy getinfo always carries
+			// a non-null model and a healthy Utilization.get always carries cpu.
+			// Surface a hollow-but-200 payload as ERROR, not a 0.0 sentinel.
+			if (s.dsmInfo.data().get("model").isNull()) {
+				throw new IOException("DSM.Info getinfo returned a 200 payload "
+						+ "with no 'model' field — treating as unreadable (no sentinel "
+						+ "metrics published)");
+			}
+			if (s.utilization.data().get("cpu").isNull()) {
+				throw new IOException("Core.System.Utilization get returned a 200 "
+						+ "payload with no 'cpu' field — treating as unreadable (no "
+						+ "sentinel metrics published)");
+			}
+
 			try {
 				SimpleJson ups = api.upsGet();
 				if (ups.data().get("usb_ups_connect").asBoolean()) {

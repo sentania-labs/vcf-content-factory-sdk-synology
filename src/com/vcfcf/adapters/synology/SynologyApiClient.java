@@ -68,7 +68,9 @@ public final class SynologyApiClient {
 			callRaw(synoUrl("SYNO.API.Auth", 7, "logout",
 					"session=" + SESSION_NAME));
 		} catch (Exception e) {
-			log.warn("Logout failed (non-fatal): " + e.getMessage());
+			// e.getMessage() may carry the request URL (with _sid) if the
+			// underlying transport embeds it; redact before it reaches the log.
+			log.warn("Logout failed (non-fatal): " + redact(String.valueOf(e.getMessage())));
 		}
 		sid = null;
 	}
@@ -181,9 +183,26 @@ public final class SynologyApiClient {
 	private SimpleJson callRaw(String path) throws IOException, InterruptedException {
 		HttpResponse<String> resp = http.get(path, HttpResponse.BodyHandlers.ofString());
 		if (resp.statusCode() != 200) {
-			throw new IOException("HTTP " + resp.statusCode() + " from " + path);
+			throw new IOException("HTTP " + resp.statusCode() + " from " + redact(path));
 		}
 		return SimpleJson.parse(resp.body());
+	}
+
+	/**
+	 * Mask secret-bearing query parameters before a path/query string can reach
+	 * the adapter log or a Test-connection error. The DSM entry.cgi URL carries
+	 * the session id ({@code _sid}) on every authenticated call and, on the login
+	 * call, the URL-encoded plaintext password and account ({@code passwd=},
+	 * {@code account=}). Any of those must never land on disk
+	 * ({@code rules/no-secrets-on-disk.md}). The api/version/method portion is
+	 * left intact so the message still identifies the failing endpoint.
+	 */
+	static String redact(String path) {
+		if (path == null) return "";
+		return path
+				.replaceAll("(?i)(_sid=)[^&]*", "$1<redacted>")
+				.replaceAll("(?i)(passwd=)[^&]*", "$1<redacted>")
+				.replaceAll("(?i)(account=)[^&]*", "$1<redacted>");
 	}
 
 	private String synoUrl(String api, int version, String method, String... extra) {

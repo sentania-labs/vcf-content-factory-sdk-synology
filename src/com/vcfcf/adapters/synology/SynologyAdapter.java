@@ -945,12 +945,22 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				String uuid = lun.get("uuid").asString();
 				if (uuid == null || uuid.isEmpty()) continue;
 				String path = SynologyStitcher.lunDataStorePath(uuid);
-				ResourceKey ds = st.matchByPath(path);
-				if (ds == null) continue;
+				List<ResourceKey> matches = st.matchByPath(path);
+				if (matches.isEmpty()) continue;
 				ResourceKey lunKey = rb.resource("SynologyIscsiLun",
 						lun.get("name").asString(uuid), "lun_uuid", uuid);
-				rb.parentForeign(ds, lunKey);
-				lunMatches++;
+				// Standardized direction (1.0.0.18): the VMWARE Datastore is the
+				// PARENT of its backing LUN — the original design intent and the
+				// same shape NFS already used. parentForeign emits
+				// setRelationships(datastore, {lun}); DEF-003 (closed) proved the
+				// platform scopes that per-reporting-adapter, so the Datastore
+				// keeps its VMWARE children and gains the synology child (no
+				// clobber). One path can back N datastores (one per vCenter view,
+				// same NAA, distinct identity) — bind every copy.
+				for (ResourceKey ds : matches) {
+					rb.parentForeign(ds, lunKey);
+					lunMatches++;
+				}
 			}
 
 			// NFS Export → Datastore via <nas_ip>/<volPath>/<share> path. NAS IPs
@@ -963,16 +973,25 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				if (rules == null || rules.data().get("rule").size() == 0) continue;
 				String volPath = share.get("vol_path").asString("");
 				ResourceKey exportKey = null;
+				// Two NAS IPs can resolve to the same DataStrorePath, yielding the
+				// same Datastore match twice; dedup per export so we never emit
+				// setRelationships(ds, {export, export}) with a duplicate child.
+				java.util.Set<ResourceKey> linkedDs = new java.util.HashSet<>();
 				for (String ip : nasIps) {
 					String path = SynologyStitcher.nfsDataStorePath(ip, volPath, name);
-					ResourceKey ds = st.matchByPath(path);
-					if (ds == null) continue;
+					List<ResourceKey> matches = st.matchByPath(path);
+					if (matches.isEmpty()) continue;
 					if (exportKey == null) {
 						exportKey = rb.resource("SynologyNfsExport", name,
 								"share_name", name);
 					}
-					rb.parentForeign(ds, exportKey);
-					nfsMatches++;
+					// One path can back N datastores (one per vCenter view) — bind
+					// every copy with the Datastore as parent (DEF-003-safe).
+					for (ResourceKey ds : matches) {
+						if (!linkedDs.add(ds)) continue;
+						rb.parentForeign(ds, exportKey);
+						nfsMatches++;
+					}
 				}
 			}
 

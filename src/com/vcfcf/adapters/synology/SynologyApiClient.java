@@ -52,7 +52,7 @@ public final class SynologyApiClient {
 				"passwd=" + urlEncode(password),
 				"session=" + SESSION_NAME,
 				"format=sid");
-		SimpleJson resp = callRaw(path);
+		SimpleJson resp = callRaw(path, "SYNO.API.Auth login");
 		if (!resp.isSuccess()) {
 			int code = (int) resp.get("error").get("code").asLong();
 			throw new IOException("Synology login failed: error code " + code);
@@ -66,7 +66,7 @@ public final class SynologyApiClient {
 		if (sid == null) return;
 		try {
 			callRaw(synoUrl("SYNO.API.Auth", 7, "logout",
-					"session=" + SESSION_NAME));
+					"session=" + SESSION_NAME), "SYNO.API.Auth logout");
 		} catch (Exception e) {
 			// e.getMessage() may carry the request URL (with _sid) if the
 			// underlying transport embeds it; redact before it reaches the log.
@@ -164,14 +164,15 @@ public final class SynologyApiClient {
 	private SimpleJson call(String api, int version, String method, String... extra)
 			throws IOException, InterruptedException {
 		ensureSession();
-		SimpleJson resp = callRaw(synoUrl(api, version, method, extra));
+		String endpoint = api + " " + method;
+		SimpleJson resp = callRaw(synoUrl(api, version, method, extra), endpoint);
 		if (!resp.isSuccess()) {
 			int code = (int) resp.get("error").get("code").asLong();
 			if (code == 106 || code == 107 || code == 119) {
 				log.info("Session expired (code=" + code + "), re-authenticating...");
 				invalidateSession();
 				login();
-				resp = callRaw(synoUrl(api, version, method, extra));
+				resp = callRaw(synoUrl(api, version, method, extra), endpoint);
 			}
 			if (!resp.isSuccess()) {
 				throw new IOException(api + " " + method + " failed: " + resp.asString());
@@ -180,10 +181,35 @@ public final class SynologyApiClient {
 		return resp;
 	}
 
-	private SimpleJson callRaw(String path) throws IOException, InterruptedException {
-		HttpResponse<String> resp = http.get(path, HttpResponse.BodyHandlers.ofString());
+	/**
+	 * Issue a raw GET. The {@code endpoint} label ({@code api + " " + method}) is
+	 * the ONLY request context allowed into a thrown message — never {@code path}.
+	 *
+	 * <p>DEF-001: the DSM {@code entry.cgi} URL carries {@code _sid} on every
+	 * authenticated call and the URL-encoded plaintext {@code passwd}/{@code account}
+	 * on login. The framework logs exception messages to the on-disk adapter log
+	 * and surfaces them on Test-connection, so a message built from the path would
+	 * land secrets on disk ({@code rules/no-secrets-on-disk.md}). The endpoint label
+	 * identifies the failing API without any query string.
+	 */
+	private SimpleJson callRaw(String path, String endpoint)
+			throws IOException, InterruptedException {
+		HttpResponse<String> resp;
+		try {
+			resp = http.get(path, HttpResponse.BodyHandlers.ofString());
+		} catch (IOException e) {
+			// DEF-001: a transport failure (connect/SSL/timeout) can throw BEFORE
+			// any response, and the underlying message may embed the request URI —
+			// which on login carries account=/passwd=<plaintext> and on every
+			// authenticated call carries _sid=. Rethrow a standalone message built
+			// from the endpoint label only; redact any message text and DO NOT chain
+			// the raw cause (a chained cause re-exposes getCause().getMessage() to
+			// the framework logger). See rules/no-secrets-on-disk.md.
+			throw new IOException("transport error calling " + endpoint + ": "
+					+ redact(String.valueOf(e.getMessage())));
+		}
 		if (resp.statusCode() != 200) {
-			throw new IOException("HTTP " + resp.statusCode() + " from " + redact(path));
+			throw new IOException("HTTP " + resp.statusCode() + " from " + endpoint);
 		}
 		return SimpleJson.parse(resp.body());
 	}

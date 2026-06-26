@@ -6,9 +6,11 @@ import com.vcfcf.adapter.stitch.SuiteApiStitcher;
 
 import com.integrien.alive.common.adapter3.Logger;
 import com.integrien.alive.common.adapter3.ResourceKey;
+import com.integrien.alive.common.adapter3.config.ResourceIdentifierConfig;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -46,37 +48,96 @@ import java.util.Map;
  */
 public final class SynologyStitcher {
 
-	private final ForeignResourceResolver resolver;
+	private final ForeignResourceResolver.SuiteApiBridge bridge;
 	private final Logger logger;
 
-	/** Last {@link #loadDatastores()} result, indexed by {@code DataStrorePath}. */
-	private Map<String, ResourceKey> datastoresByPath = Collections.emptyMap();
+	/**
+	 * Last {@link #loadDatastores()} result: every VMWARE Datastore
+	 * {@link ResourceKey} that shares a given {@code DataStrorePath}, indexed by
+	 * that path. <b>Multi-valued</b> (build 1.0.0.18): a shared datastore resolves
+	 * to N {@code VMWARE/Datastore} objects — one per vCenter view, same NAA /
+	 * server path but a distinct {@code (VMEntityObjectID, VMEntityVCID)} identity.
+	 * {@code loadAll} (single-valued) silently collapsed those to the last-seen
+	 * copy and dropped the rest, so only one vCenter's datastore got the cross-MP
+	 * edge. We index the bridge entries ourselves to keep all copies.
+	 */
+	private Map<String, List<ResourceKey>> datastoresByPath = Collections.emptyMap();
 
 	public SynologyStitcher(SuiteApiStitcher stitcher, Logger logger) {
 		this.logger = logger;
-		this.resolver = new ForeignResourceResolver(
-				new SuiteApiDatastoreBridge(stitcher, logger), logger);
+		this.bridge = new SuiteApiDatastoreBridge(stitcher, logger);
 	}
 
 	/**
-	 * Load all VMWARE Datastores from inventory, indexed by their
-	 * {@code DataStrorePath} identifier. Returns the count loaded. A Suite API
-	 * failure inside the resolver yields an empty map (logged WARN by the
-	 * resolver) — never a thrown exception out of the relationship pass.
+	 * Load all VMWARE Datastores from inventory, indexing <b>every</b> copy that
+	 * carries a given {@code DataStrorePath} (a shared datastore appears once per
+	 * vCenter view, same path, distinct identity). Returns the number of Datastore
+	 * objects loaded. A Suite API failure yields an empty index (logged WARN) —
+	 * never a thrown exception out of the relationship pass.
+	 *
+	 * <p><b>Why not {@code resolver.loadAll}.</b> {@code ForeignResourceResolver}
+	 * indexes by {@code idValue} into a {@code Map<String,ResourceKey>}, so two
+	 * datastores with the same {@code DataStrorePath} collapse to one — the fleet
+	 * never sees the second vCenter's copy. We consume the same
+	 * {@link ForeignResourceResolver.SuiteApiBridge} directly and build a
+	 * multi-valued index, reusing the resolver's exact {@link ResourceKey}
+	 * construction (name/kind/adapterKind + per-identifier uniqueness flags).
 	 */
 	public int loadDatastores() {
-		this.datastoresByPath = resolver.loadAll("VMWARE", "Datastore",
-				"DataStrorePath");
-		return datastoresByPath.size();
+		Map<String, List<ResourceKey>> index = new HashMap<>();
+		int total = 0;
+		try {
+			List<ForeignResourceResolver.ResourceEntry> entries =
+					bridge.listResources("VMWARE", "Datastore");
+			if (entries != null) {
+				for (ForeignResourceResolver.ResourceEntry e : entries) {
+					if (e == null) continue;
+					total++;
+					ResourceKey key = new ResourceKey(e.name, e.resourceKind,
+							e.adapterKind);
+					String pathVal = null;
+					for (String[] id : e.identifiers) {
+						if (id == null || id.length < 2) continue;
+						boolean isUnique = id.length >= 3
+								&& Boolean.parseBoolean(id[2]);
+						key.addIdentifier(new ResourceIdentifierConfig(
+								id[0], id[1], isUnique));
+						if ("DataStrorePath".equals(id[0])) {
+							pathVal = id[1];
+						}
+					}
+					if (pathVal != null && !pathVal.isEmpty()) {
+						index.computeIfAbsent(pathVal, k -> new ArrayList<>())
+								.add(key);
+					}
+				}
+			}
+		} catch (Exception ex) {
+			logger.warn("SynologyStitcher: VMWARE Datastore load failed: "
+					+ ex.getMessage());
+			index = Collections.emptyMap();
+		}
+		this.datastoresByPath = index;
+		int keyCount = 0;
+		for (List<ResourceKey> l : index.values()) keyCount += l.size();
+		logger.info("SynologyStitcher: loaded " + total + " VMWARE Datastores, "
+				+ index.size() + " distinct DataStrorePath values, " + keyCount
+				+ " keys indexed");
+		return total;
 	}
 
 	/**
-	 * Resolve a VMWARE Datastore {@link ResourceKey} by its {@code DataStrorePath}
-	 * value, or {@code null} when no such datastore exists in inventory.
+	 * Resolve <b>all</b> VMWARE Datastore {@link ResourceKey}s sharing the given
+	 * {@code DataStrorePath} value, or an empty list when none exist in inventory.
+	 * One path can map to N datastores (one per vCenter view) — the caller emits a
+	 * cross-MP edge from each.
 	 */
-	public ResourceKey matchByPath(String dataStorePath) {
-		if (dataStorePath == null || dataStorePath.isEmpty()) return null;
-		return datastoresByPath.get(dataStorePath);
+	public List<ResourceKey> matchByPath(String dataStorePath) {
+		if (dataStorePath == null || dataStorePath.isEmpty()) {
+			return Collections.emptyList();
+		}
+		List<ResourceKey> matches = datastoresByPath.get(dataStorePath);
+		return matches != null ? matches : Collections.emptyList();
 	}
 
 	/**
@@ -177,8 +238,16 @@ public final class SynologyStitcher {
 								.asString(null);
 						String idVal = id.get("value").asString(null);
 						if (idName == null) continue;
+						// Propagate the real per-identifier uniqueness flag.
+						// Hardcoding "true" built a 4-tuple identity that could
+						// not bind to the real 2-tuple VMWARE Datastore key, so
+						// the cross-MP edge was silently dropped. Absent/null
+						// defaults to false (asBoolean) — never over-mark.
+						boolean isUnique = id.get("identifierType")
+								.get("isPartOfUniqueness").asBoolean();
 						identifiers.add(new String[]{idName,
-								idVal == null ? "" : idVal, "true"});
+								idVal == null ? "" : idVal,
+								isUnique ? "true" : "false"});
 					}
 				}
 				out.add(new ForeignResourceResolver.ResourceEntry(

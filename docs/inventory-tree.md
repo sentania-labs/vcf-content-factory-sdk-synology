@@ -1,6 +1,6 @@
 # Inventory Tree — VCF Content Factory Synology DiskStation
 
-> Generated from `describe.xml` v1.0.0.17. Do not edit — regenerated on every build.
+> Generated from `describe.xml` v1.0.0.19. Do not edit — regenerated on every build.
 
 **Traversal Spec:** Synology DiskStation Storage Tree
 
@@ -12,6 +12,7 @@
       - **Synology Storage Pool** (`SynologyStoragePool`)
         - **Synology Volume** (`SynologyVolume`)
           - **Synology iSCSI LUN** (`SynologyIscsiLun`)
+            - **Datastore** (`Datastore`)
           - **Synology NFS Export** (`SynologyNfsExport`)
           - **Synology SSD Cache** (`SynologySsdCache`)
             - **Synology Disk** (`SynologyDisk`)

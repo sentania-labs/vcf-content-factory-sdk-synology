@@ -1,5 +1,126 @@
 # Changelog
 
+## 1.0.0.19 (2026-06-26)
+
+- fix(adapter): complete DEF-001 — redact login/collect transport-exception path
+  (plaintext password no longer reachable via connect/SSL/timeout failures); NFS
+  fan-out child dedup. `callRaw` now wraps `http.get(path, …)` in try/catch so a
+  transport failure thrown BEFORE any response (connect/SSL/timeout) rethrows a
+  standalone `IOException` built from the `endpoint` label only, with any message
+  text `redact()`-scrubbed and NO chained cause (chaining would re-expose
+  `getCause().getMessage()` to the framework logger). Closes the residual
+  login-path `account=`/`passwd=<plaintext>` leak flagged in build-18 review.
+  Also dedups NFS-export children per Datastore so two NAS IPs resolving to the
+  same `DataStrorePath` no longer emit `setRelationships(ds, {export, export})`.
+
+## 1.0.0.18 (2026-06-26)
+
+First `1.0.0.x` RELEASE-line build (prod is at `v1.0.0.17`). Consolidates the
+cross-MP datastore-stitch work proven on devel (build `0.0.0.22`) into a clean,
+gate-ready release. Bundles the same framework base jar
+(`vcfcf-adapter-base.jar`, sha256
+`4eabad523a30ed547b5aa8987b26d1517dc9d7c89c87a6217ac642ebb3734c53`).
+
+- fix(adapter): DEF-001 — `SynologyApiClient` thrown/logged messages no longer
+  carry the request path/query. `callRaw` now builds its `HTTP <code>` message
+  from an `api + method` endpoint label only; `login`/`logout`/`call` pass that
+  label instead of the `_sid`/`account`/`passwd`-bearing path. The `_sid`-bearing
+  logout WARN stays `redact()`-scrubbed. Closes the plaintext-password /
+  `_sid`-on-disk exposure (`rules/no-secrets-on-disk.md`).
+- fix(adapter): cross-MP foreign Datastore `ResourceKey` now binds — root cause
+  was a hardcoded `isPartOfUniqueness=true` on every foreign identifier, which
+  built a 4-tuple identity that could not match the real 2-tuple VMWARE Datastore
+  key, so the runtime-pushed edge was silently dropped. The bridge now propagates
+  each identifier's real uniqueness flag (carried forward from `0.0.0.22`).
+- fix(adapter): standardize cross-MP relationship direction to
+  `parentForeign(datastore, child)` for BOTH iSCSI LUN and NFS Export — the
+  VMWARE Datastore is the parent of its backing LUN/Export (original design
+  intent). Reverts the `0.0.0.21` iSCSI experiment that used
+  `childForeign(lunKey, ds)`. This is the DEF-003 idiom, which is closed /
+  proven-safe: the platform scopes `setRelationships` per-reporting-adapter, so
+  the Datastore retains its VMWARE children and only gains the synology child (no
+  clobber) — see DEF-003 and `lessons/setrelationships-foreign-adapter-scoped.md`.
+- fix(adapter): describe.xml is now symmetric across both storage types — the
+  iSCSI foreign path uses the inverse modifier `||VMWARE::Datastore::~child`
+  (Datastore = parent) and a matching NFS foreign path was added. These
+  declarative paths are UI-navigation only; persistence is driven by the runtime
+  push + correct foreign key (devel proof: NFS edges persisted with no
+  declarative path at all).
+- fix(adapter): multi-datastore fan-out. A shared datastore resolves to N
+  `VMWARE/Datastore` objects (one per vCenter view — same NAA / server path,
+  distinct `(VMEntityObjectID, VMEntityVCID)`). `matchByPath` now returns ALL
+  datastore keys for a path (was one — the single-valued `resolver.loadAll`
+  collapsed duplicates), and both the iSCSI and NFS loops emit a `parentForeign`
+  edge from each matching datastore. `SynologyStitcher` indexes the Suite API
+  bridge entries directly into a `Map<String,List<ResourceKey>>`.
+
+## 0.0.0.22 (2026-06-26)
+
+- fix: foreign Datastore ResourceKey now carries real isPartOfUniqueness flags
+  (was hardcoded true → 4-tuple identity couldn't bind to real 2-tuple VMWARE
+  Datastore; silent cross-MP edge drop)
+
+## 0.0.0.21 (2026-06-26)
+
+- experiment(adapter): flip cross-MP Datastore edge to owned-LUN-parent →
+  foreign-Datastore-child (platform silently filters foreign-parent writes;
+  spec-07 one-directional rule). `emitDatastoreCrossLink()` now calls
+  `rb.childForeign(lunKey, ds)` instead of `rb.parentForeign(ds, lunKey)` for the
+  iSCSI LUN edge, making the owned `SynologyIscsiLun` the PARENT and the foreign
+  `VMWARE::Datastore` the CHILD so the edge rides the same persistence path as the
+  internal owned-parent tree. describe.xml ResourcePath flipped from the inverse
+  `||VMWARE::Datastore::~child` to normal descent `||VMWARE::Datastore::child`.
+  SCOPE: iSCSI LUN only — NFS path and `matchByPath`/fan-out untouched. Dev
+  preview only, not for release. Bundles the same framework base jar
+  (`vcfcf-adapter-base.jar`, sha256
+  `4eabad523a30ed547b5aa8987b26d1517dc9d7c89c87a6217ac642ebb3734c53`).
+
+## 0.0.0.20 (2026-06-26)
+
+- experiment(adapter): declare cross-MP `VMWARE::Datastore` ResourcePath to test
+  foreign-edge persistence (spec 07). Adds one declarative `<ResourcePath>` inside
+  the existing `Synology DiskStation Storage Tree` TraversalSpecKind that extends
+  the iSCSI LUN path with a foreign segment `||VMWARE::Datastore::~child`. The
+  inverse modifier (`::~child`) reaches the Datastore as the LUN's PARENT, matching
+  the runtime `parentForeign(ds, lunKey)` push (Datastore=parent, LUN=child). This
+  is a single-variable test of the hypothesis that a runtime-pushed cross-MP edge
+  only persists when its shape is also declared in describe.xml. SCOPE: iSCSI LUN
+  only — NFS path and `matchByPath`/fan-out untouched; runtime push unchanged. Dev
+  preview only, not for release. Bundles the same framework base jar
+  (`vcfcf-adapter-base.jar`, sha256
+  `4eabad523a30ed547b5aa8987b26d1517dc9d7c89c87a6217ac642ebb3734c53`).
+
+## 0.0.0.19 (2026-06-25)
+
+- chore(adapter): build 19 — dev preview build under the **corrected** hand-build
+  version convention. The previous build (18) used `major.minor.patch = 99.0.0`
+  to make hand-builds visually distinct, but `99.x` is a defect: a `99.0.0.x` pak
+  makes a future real `1.0.0.x` CI release look like a **downgrade**, triggering
+  upgrade-refusal on the target. Corrected convention: dev/hand builds set
+  `major.minor.patch = 0.0.0` (always strictly below any real release), so this
+  pak's version is `0.0.0.19`; the `build_number` counter continues incrementing
+  normally (18 → 19). CI/release builds keep the `1.0.0.x` line. No adapter source
+  change vs build 18 — describe.xml, resources, Java source, metric/property keys,
+  resource kinds, identifiers, relationships, and contract-assert behavior are
+  byte-unchanged; the only delta vs build 18 is the version string. Bundles the
+  localization-fixed framework base jar (`vcfcf-adapter-base.jar`, sha256
+  `4eabad523a30ed547b5aa8987b26d1517dc9d7c89c87a6217ac642ebb3734c53`; carries the
+  `AdapterDescribe.make(InputStream)` → `make(String)` swap so describe.xml
+  `nameKey`s resolve to localized strings). Not for release — the official
+  `1.0.0.x` line is cut by the pak repo's CI on a `v*` tag.
+
+## 99.0.0.18 (2026-06-25)
+
+- chore(adapter): dev preview build. Rebuilt to bundle the localization-fixed
+  framework base jar (`vcfcf-adapter-base.jar`, 60252 bytes,
+  sha256 4eabad523a30ed547b5aa8987b26d1517dc9d7c89c87a6217ac642ebb3734c53)
+  carrying the `onDescribe()` `AdapterDescribe.make(String)` swap. No adapter
+  source change; metric/property keys, resource kinds, identifiers,
+  relationships, and contract-assert behavior are byte-identical to build 17.
+- chore(adapter): version major set to 99 (`99.0.0.18`) per the hand-built
+  dev-preview marker convention — keeps locally hand-built paks visually
+  distinct from the CI/release `1.0.0.x` line. Not for release.
+
 ## 1.0.0.17 (2026-06-10)
 
 - feat(adapter): adopt framework v2 §22 collect-path discovery (build-framework

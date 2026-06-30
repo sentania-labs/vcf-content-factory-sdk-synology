@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0.20 (2026-06-30)
+
+- chore(adapter): build 20 — **no adapter source change**. describe.xml,
+  resources, Java source, metric/property keys, resource kinds, identifiers,
+  relationships, and contract-assert behavior are byte-unchanged vs build 19;
+  the only delta is the version string and a recompile against the fixed
+  framework. Recompiles against framework `sdk-buildkit-v1.0.4` to pick up the
+  unified Suite API transport fix (loopback hostname-verifier parity +
+  CP/remote TOFU+strict; factory PR #30). The Suite API property pusher /
+  stitch bridge now negotiates TLS correctly on both the in-VM loopback path
+  and the CP/remote path, so cross-MP datastore stitch keeps working under the
+  corrected transport. CI/release line continues at `1.0.0.x`.
+
 ## 1.0.0.19 (2026-06-26)
 
 - fix(adapter): complete DEF-001 — redact login/collect transport-exception path

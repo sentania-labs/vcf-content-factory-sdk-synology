@@ -19,6 +19,6 @@
 ## Quick Reference
 
 - **Adapter kind:** `synology_diskstation`
-- **Version:** 1.0.0.19
+- **Version:** 1.0.0.20
 - **Traversal spec:** Synology DiskStation Storage Tree
 - **Resource kinds:** 9

@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.0.0.24 (2026-07-01)
+
+- fix(framework): build 24 — **no adapter source change**. describe.xml,
+  resources, Java source, metric/property keys, resource kinds, identifiers,
+  relationships, and contract-assert behavior are byte-unchanged vs build 23;
+  the only delta is the version string and a recompile against the updated
+  framework `adapter_framework/` bundled by `build-sdk`. This build inherits the
+  **DEF-005 transport fix** (`context/defects.md` DEF-005) on top of build 23's
+  identity + additive-verb fixes. DEF-005: the strict-TOFU loopback Suite API
+  transport (PRs #29/#30, latent in every build ≥ 20) PKIX-failed every cycle on
+  live devel — the platform's non-disruptive cert handler never persists trust
+  for framework adapters ("renewal url set is empty"), so `loadDatastores`
+  failed forever and the cross-MP datastore stitch read zero datastores. The fix
+  (review-approved: `context/reviews/framework/bc-mirror-transport-v1.md` +
+  `-v2.md`) makes the loopback Suite API hop **mirror the Broadcom vendor
+  `aria-ops-core SuiteAPIClient` transport exactly** — trust-all +
+  ignore-hostname on the non-FIPS branch; FIPS-approved-only mode logs a
+  once-per-adapter-instance WARN and falls through to the non-FIPS mirror. This
+  is a framework-jar-only change: the bundled `vcfcf-adapter-base.jar` now
+  carries `VcfCfAdapter.applyBcMirrorTransport` + the `fipsGapWarnLogged` gate,
+  and the old strict-path machinery is removed from `openPlatformConnection`.
+  The build-23 fixes are preserved intact: ambient identity (CP-403 —
+  `AmbientCredential` automation-first + `getSourceLabel()`) and additive
+  foreign-parent edges (`RelationshipBuilder`). Devel/prod test build — no `v*`
+  release tag. Per RULE-014 (`rules/pak-version-lines.md`) the hand build stamps
+  the `0.x` dev-preview line automatically: this pak is expected to be
+  `0.0.0.24` (a `1.0.0.24` would be a guardrail failure). DEF-005 remains open
+  and correctly gates `v*` RELEASES only (RULE-012) — it is not a blocker for
+  this dev-preview build, and closes on the live-devel collect that loads
+  datastores and writes the stitch under the fixed transport.
+
 ## 1.0.0.23 (2026-07-01)
 
 - fix(framework): build 23 — **no adapter source change**. describe.xml,

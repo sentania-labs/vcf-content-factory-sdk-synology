@@ -10,6 +10,15 @@
 		<CredentialKind key="synology_credentials" nameKey="2">
 			<CredentialField key="username" nameKey="3" type="string" required="true" dispOrder="1"/>
 			<CredentialField key="password" nameKey="4" type="string" required="true" password="true" dispOrder="2"/>
+			<!-- OPTIONAL — VCF Ops Suite API explicit credentials (remote collector / -->
+			<!-- Cloud Proxy only). Leave ALL THREE blank on a primary/analytics node: -->
+			<!-- the adapter then uses the ambient localhost/maintenance-user path,    -->
+			<!-- byte-identical to prior behavior. Fill these only when this instance   -->
+			<!-- runs on a remote collector, where localhost/suite-api 403s — point     -->
+			<!-- vrops_url at the PRIMARY/analytics FQDN, never localhost-on-collector.  -->
+			<CredentialField key="vrops_url" nameKey="300" type="string" required="false" dispOrder="3"/>
+			<CredentialField key="vrops_username" nameKey="301" type="string" required="false" dispOrder="4"/>
+			<CredentialField key="vrops_password" nameKey="302" type="string" required="false" password="true" dispOrder="5"/>
 		</CredentialKind>
 	</CredentialKinds>
 

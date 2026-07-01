@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.0.0.23 (2026-07-01)
+
+- fix(framework): build 23 — **no adapter source change**. describe.xml,
+  resources, Java source, metric/property keys, resource kinds, identifiers,
+  relationships, and contract-assert behavior are byte-unchanged vs build 22;
+  the only delta is the version string and a recompile against the updated
+  framework `adapter_framework/` bundled by `build-sdk`. This build exists to
+  live-test two inherited stitcher fixes BEFORE the framework PR is opened
+  (design-of-record: `designs/stitcher-identity-and-additive-foreign-v1.md`):
+  (1) **Ambient identity (CP-403 fix):** `AmbientCredential` now prefers
+  `automationuser.properties` (principal `automationAdmin`, RBAC-bearing on
+  every node role including a Cloud Proxy) and falls back to
+  `maintenanceuser.properties` only when the automation file is absent;
+  `SuiteApiStitchClient` INFO-logs the selected `file=automation|maintenance|
+  override` plus principal. This fixes the Synology-on-CP stitch that silently
+  read nothing as `cloudproxy_<uuid>` (`roles:[]`). (2) **Additive foreign
+  parents:** `RelationshipBuilder` emits foreign-parent edges (e.g. onto VMWARE
+  Datastore) additively via the delta/add path instead of full-set
+  `setRelationships`, matching the Broadcom TVS corpus and remaining clobber-safe
+  across platform versions; own-adapter hierarchies keep the consolidated
+  one-`setRelationships`-per-parent idiom. Foreign-key identity handling
+  (`DataStorePath`, real `isPartOfUniqueness` propagation) is preserved intact.
+  Devel/prod test build — no `v*` release tag.
+
+## 1.0.0.22 (2026-06-30)
+
+- fix(adapter): build 22 — review delta on build 21 (explicit Suite API creds).
+  Make the spec §4 / ledger-#13 sharp edge loud: when `vrops_username` +
+  `vrops_password` are set but `vrops_url` is blank, malformed, or localhost
+  (all collapse to a loopback host that 403s on a remote collector), the adapter
+  now emits a distinct startup WARN naming the misconfiguration and directing
+  the operator to set the URL to the PRIMARY/analytics FQDN — instead of a
+  localhost-aimed explicit stitch that *looks* configured while silently reading
+  nothing. Loopback is resolved via `InetAddress.isLoopbackAddress()` (new
+  `SynologyConfig.suiteApiHostIsLoopback()`), consistent with the framework's
+  peer gating, so `127.x` / `::1` and the malformed-URL→localhost degrade are
+  all caught. The explicit path is still taken as configured (no silent
+  fallback). NITs: `SynologyAdapter` now reuses one hoisted `suiteHost` local
+  (used in both the explicit branch and the catch); the unparseable-URL safe
+  degrade to localhost is unchanged but is now covered by the new WARN. No
+  describe.xml / metric / property / relationship / resource-identifier change;
+  blank-config ambient path remains byte-unchanged.
+
+## 1.0.0.21 (2026-06-30)
+
+- feat(adapter): build 21 — optional explicit Suite API credentials for the
+  Datastore cross-link on a remote collector / Cloud Proxy. Adds three OPTIONAL
+  `required="false"` credential fields to `synology_credentials` —
+  `vrops_url`, `vrops_username`, `vrops_password` (password-masked) — grouped
+  as "VCF Ops Suite API (remote collector only)". At stitcher construction the
+  adapter now branches: when `vrops_username` AND `vrops_password` are both
+  non-blank it builds via `SuiteApiStitcher.createExplicit(<primary FQDN parsed
+  from vrops_url>, user, pass)` (the only path that serves the global VMWARE
+  inventory off-primary — spec 20 §4); otherwise it falls back to the existing
+  ambient `create()` (localhost / maintenance user). One startup log line states
+  the selected path (ambient vs explicit→host); the password is never logged.
+  **Blank config ⇒ ambient ⇒ primary-node behavior is byte-unchanged** vs build
+  20 (no resource-identifier change, no metric/property/relationship change).
+  Closes the CP/remote-collector 403 gap left by the ambient-only stitch.
+
 ## 1.0.0.20 (2026-06-30)
 
 - chore(adapter): build 20 — **no adapter source change**. describe.xml,

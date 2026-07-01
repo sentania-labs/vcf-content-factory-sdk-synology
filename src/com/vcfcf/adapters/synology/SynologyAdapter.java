@@ -130,24 +130,64 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				componentLogger(SynologyApiClient.class));
 		this.snapshot = null;
 
-		// Optional Datastore cross-link transport (build 16). Ambient mode —
-		// no describe.xml credential fields, matching v1's zero-config stitch.
-		// create() reads maintenanceuser.properties and targets
-		// https://localhost/suite-api; on a remote collector that file is absent
-		// and create() throws IllegalStateException. v1's stitchDatastores was
-		// itself gated on Suite API availability, so we degrade exactly as v1
-		// did: WARN once, leave stitcher null, and let the cycle complete with
-		// all 25 resources collecting normally and only the cross-link skipped.
+		// Optional Datastore cross-link transport (build 16; explicit-creds
+		// branch build 21). Two paths, selected by config:
+		//   - AMBIENT (default): create() reads maintenanceuser.properties and
+		//     targets https://localhost/suite-api. Works on a primary/analytics
+		//     node; on a remote collector that file is absent (or localhost
+		//     serves no global VMWARE inventory → 403). This is the v1 path and
+		//     is byte-unchanged when the explicit fields are blank.
+		//   - EXPLICIT (remote collector / Cloud Proxy): when vrops_username AND
+		//     vrops_password are configured, createExplicit() targets the
+		//     operator-supplied PRIMARY/analytics FQDN (parsed from vrops_url)
+		//     with those credentials — the only path that serves the global
+		//     VMWARE inventory off-primary (spec 20 §4 / suite-api TLS-auth
+		//     design §0.1 Q2). Pointing explicit creds at localhost-on-collector
+		//     still reads nothing, so the operator must supply the primary FQDN.
+		// Either factory throwing leaves the stitcher null and degrades exactly
+		// as v1 did: WARN once, all 25 resources still collect, cross-link
+		// skipped for the cycle. The password is never logged.
+		final boolean explicitSuiteApi = cfg.hasExplicitSuiteApi();
+		final String suiteHost = explicitSuiteApi ? cfg.suiteApiHost() : null;
 		try {
-			this.suiteStitcher = SuiteApiStitcher.create(this,
-					componentLogger(SuiteApiStitcher.class));
+			if (explicitSuiteApi) {
+				// Loud-fail the spec §4 / ledger-#13 sharp edge: explicit creds
+				// set but a blank, malformed, or localhost URL all collapse to a
+				// loopback host, which serves no global VMWARE inventory on a
+				// remote collector (403). Still take the explicit path as
+				// configured — but make the misconfiguration unambiguous rather
+				// than letting a localhost-aimed explicit stitch look configured
+				// while silently reading nothing.
+				if (cfg.suiteApiHostIsLoopback()) {
+					logWarn("Datastore cross-link: explicit Suite API credentials "
+							+ "are set but the URL is missing, malformed, or "
+							+ "resolves to localhost (" + suiteHost + "); on a "
+							+ "remote collector this cannot reach the cluster's "
+							+ "global VMWARE inventory and will 403 — set the Suite "
+							+ "API URL to the PRIMARY/analytics FQDN. Proceeding on "
+							+ "the explicit path as configured.");
+				}
+				this.suiteStitcher = SuiteApiStitcher.createExplicit(this,
+						componentLogger(SuiteApiStitcher.class),
+						suiteHost, cfg.suiteApiUser, cfg.suiteApiPassword);
+				logInfo("Datastore cross-link: explicit Suite API path -> "
+						+ suiteHost + " (user=" + cfg.suiteApiUser + ")");
+			} else {
+				this.suiteStitcher = SuiteApiStitcher.create(this,
+						componentLogger(SuiteApiStitcher.class));
+				logInfo("Datastore cross-link: ambient Suite API path "
+						+ "(localhost / maintenance user)");
+			}
 			this.stitcher = new SynologyStitcher(this.suiteStitcher,
 					componentLogger(SynologyStitcher.class));
 		} catch (RuntimeException e) {
 			this.suiteStitcher = null;
 			this.stitcher = null;
 			logWarn("Datastore cross-link skipped — Suite API unavailable "
-					+ "(remote collector without maintenanceuser.properties?): "
+					+ (explicitSuiteApi
+							? "(explicit creds to " + suiteHost
+									+ " could not be resolved): "
+							: "(remote collector without maintenanceuser.properties?): ")
 					+ e.getMessage());
 		}
 
@@ -162,7 +202,13 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		String allowInsecure = getIdentifier(rc, "allowInsecure");
 		String username = getCredentialField(rc, "username");
 		String password = getCredentialField(rc, "password");
-		return new SynologyConfig(host, port, username, password, allowInsecure);
+		// Optional explicit Suite API credentials (remote collector / Cloud Proxy).
+		// Absent on a primary node → null → blank → ambient path (byte-unchanged).
+		String suiteApiUrl = getCredentialField(rc, "vrops_url");
+		String suiteApiUser = getCredentialField(rc, "vrops_username");
+		String suiteApiPassword = getCredentialField(rc, "vrops_password");
+		return new SynologyConfig(host, port, username, password, allowInsecure,
+				suiteApiUrl, suiteApiUser, suiteApiPassword);
 	}
 
 	private ManagedHttpClient buildHttpClient(SynologyConfig cfg) {

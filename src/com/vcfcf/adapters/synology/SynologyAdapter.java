@@ -754,6 +754,21 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			metric(out, "IO|read_latency", io.get("read_latency").asDouble());
 			metric(out, "IO|write_latency", io.get("write_latency").asDouble());
 		}
+
+		// --- Declarative cross-MP relationship property (build 25, DEF-006
+		// experiment: designs/sdk-adapters/synology-declarative-stitch-
+		// experiment.md). Zero Suite API involvement — the value is the same
+		// VMFS extent path SynologyStitcher already computes for the runtime
+		// stitcher's DataStrorePath match (SynologyStitcher#lunDataStorePath),
+		// built purely from the LUN's own UUID. Property key
+		// "relationships|Datastore_parent" mirrors Oracle's live-proven
+		// "relationships|VirtualMachine_parent" placeholder (recon
+		// 2026-07-02) and the describe.xml Datastore_parent isProperty
+		// attribute added above.
+		String lunDsPath = SynologyStitcher.lunDataStorePath(uuid);
+		if (lunDsPath != null) {
+			prop(out, "relationships|Datastore_parent", lunDsPath);
+		}
 	}
 
 	private void collectNfsExport(ResourceConfig rc, Snapshot s, List<MetricData> out) {
@@ -797,6 +812,29 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 		metric(out, "Clients|active_client_count",
 				(double) s.nfsClientsByShare.getOrDefault(name, 0));
+
+		// --- Declarative cross-MP relationship property (build 25, DEF-006
+		// experiment: designs/sdk-adapters/synology-declarative-stitch-
+		// experiment.md). Same construction SynologyStitcher already uses for
+		// the runtime stitcher's DataStrorePath match
+		// (SynologyStitcher#nfsDataStorePath), built purely from this NAS's
+		// own connected IP + the export's own vol_path/share name — zero
+		// Suite API involvement. One export can be reachable over N NAS IPs;
+		// the property carries a single value (the first connected IP, same
+		// deterministic ordering SynologyStitcher#connectedNasIps returns),
+		// matching the singular-value shape of the vendor's own
+		// Datastore_parent placeholder. Property key
+		// "relationships|Datastore_parent" mirrors Oracle's live-proven
+		// "relationships|VirtualMachine_parent" placeholder (recon
+		// 2026-07-02).
+		List<String> nasIps = SynologyStitcher.connectedNasIps(s.networkInterfaces);
+		if (!nasIps.isEmpty()) {
+			String nfsDsPath = SynologyStitcher.nfsDataStorePath(
+					nasIps.get(0), volPath, name);
+			if (nfsDsPath != null) {
+				prop(out, "relationships|Datastore_parent", nfsDsPath);
+			}
+		}
 	}
 
 	private void collectUps(ResourceConfig rc, Snapshot s, List<MetricData> out) {

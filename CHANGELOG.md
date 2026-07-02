@@ -1,5 +1,54 @@
 # Changelog
 
+## 0.0.0.25 (2026-07-02)
+
+- feat(synology): build 25 — **EXPERIMENT for DEF-006**
+  (`context/defects.md` DEF-006; design-of-record:
+  `designs/sdk-adapters/synology-declarative-stitch-experiment.md`). Tests
+  whether the platform's property-driven relationship mechanism —
+  live-proven CP-immune for Oracle
+  (`relationships|VirtualMachine_parent = oracledemo`, zero Suite API
+  calls, recon 2026-07-02) — also binds a `VMWARE::Datastore` from a
+  **path-valued** property, giving Synology a zero-credential stitch on a
+  Cloud Proxy. Two changes, both additive; **the runtime credentialed
+  stitcher (`SynologyStitcher`, `emitDatastoreCrossLink`) is untouched** —
+  it stays the isolation control, dead on the prod CP (DEF-006, 401 every
+  cycle), so any new edge there is attributable only to the property
+  mechanism:
+  1. **describe.xml:** added a `relationships` `ResourceGroup` +
+     `Datastore_parent` `isProperty="true"` `ResourceAttribute` to both
+     `SynologyIscsiLun` and `SynologyNfsExport`, cloned verbatim from the
+     TVS storage-pak construct quoted in
+     `context/api-maps/tvs-declarative-stitching.md` — e.g. PureStorage
+     FlashArray 4.3.0 `describe.xml` line 225: `<ResourceAttribute
+     key="Datastore_parent" nameKey="81" dataType="string"
+     isProperty="true" defaultMonitored="true" isDiscrete="false"
+     keyAttribute="false" isRate="false" hidden="false">
+     </ResourceAttribute>`, same attribute set. The `||VMWARE::Datastore::
+     ~child` traversal hop this placeholder pairs with already existed in
+     this adapter since build 18 (`TraversalSpecKinds`, unchanged this
+     build). New nameKeys 285-288 added to `resources/resources.properties`
+     (max prior was 302; no collision).
+  2. **SynologyAdapter.java:** `collectIscsiLun` and `collectNfsExport` now
+     each report a string property `relationships|Datastore_parent` valued
+     with the *same* VMFS/NFS path `SynologyStitcher` already computes for
+     its own `DataStrorePath` match — `SynologyStitcher.lunDataStorePath
+     (uuid)` (`"VMFS:|naa.<lun-naa>|"`) for LUNs,
+     `SynologyStitcher.nfsDataStorePath(nasIp, volPath, shareName)`
+     (`"<nas-ip>/<export-path>"`, first connected NAS IP) for NFS exports.
+     Both helpers are pre-existing (build 16); build 25 adds no new value
+     construction, only a new consumer of the existing one. Zero Suite API
+     involvement in producing these values — both are pure functions of
+     data already collected from the Synology DSM API. Property-key
+     convention (`relationships|Datastore_parent`) verified against
+     Oracle's live property `relationships|VirtualMachine_parent =
+     oracledemo` (recon 2026-07-02, quoted in the design doc) — same
+     `relationships|<Kind>_parent` shape, `Datastore` substituted for
+     `VirtualMachine` per the describe.xml placeholder's attribute key.
+  - Devel/prod test build — no `v*` release tag. Per RULE-014
+    (`rules/pak-version-lines.md`) this hand build is expected to stamp
+    `0.0.0.25`.
+
 ## 0.0.0.24 (2026-07-01)
 
 - fix(framework): build 24 — **no adapter source change**. describe.xml,

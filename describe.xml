@@ -265,29 +265,6 @@
 				<ResourceAttribute key="target_enabled" nameKey="283" dataType="string" isProperty="true"/>
 				<ResourceAttribute key="network_portals" nameKey="284" dataType="string" isProperty="true"/>
 			</ResourceGroup>
-
-			<!-- Declarative cross-MP relationship placeholder (build 25, DEF-006
-			     experiment: designs/sdk-adapters/synology-declarative-stitch-
-			     experiment.md). Cloned verbatim from the TVS storage-pak
-			     construct — e.g. PureStorage FlashArray 4.3.0
-			     describe.xml, ResourceKind
-			     pure_storage_flasharray_purestorage_flasharray_volume, line 225:
-			     <ResourceAttribute key="Datastore_parent" nameKey="81"
-			     dataType="string" isProperty="true" defaultMonitored="true"
-			     isDiscrete="false" keyAttribute="false" isRate="false"
-			     hidden="false"></ResourceAttribute> — same attribute set,
-			     same "relationships" ResourceGroup key, same Datastore_parent
-			     attribute key, matching Oracle's live-proven
-			     VirtualMachine_parent placeholder too
-			     (oracledatabase_adapter_3/conf/describe.xml line 549).
-			     See context/api-maps/tvs-declarative-stitching.md. -->
-			<ResourceGroup key="relationships" nameKey="285" instanced="false">
-				<ResourceAttribute key="Datastore_parent" nameKey="286"
-				                   dataType="string" isProperty="true"
-				                   defaultMonitored="true" isDiscrete="false"
-				                   keyAttribute="false" isRate="false"
-				                   hidden="false"/>
-			</ResourceGroup>
 		</ResourceKind>
 
 		<!-- ================================================================ -->
@@ -322,17 +299,6 @@
 				<ResourceAttribute key="compress_enabled" nameKey="204" dataType="string" isProperty="true"/>
 				<ResourceAttribute key="rule_count" nameKey="205" dataType="string" isProperty="true"/>
 				<ResourceAttribute key="allowed_clients" nameKey="206" dataType="string" isProperty="true"/>
-			</ResourceGroup>
-
-			<!-- Declarative cross-MP relationship placeholder (build 25, DEF-006
-			     experiment) — same construct as SynologyIscsiLun above; see the
-			     comment there for the vendor-quote provenance. -->
-			<ResourceGroup key="relationships" nameKey="287" instanced="false">
-				<ResourceAttribute key="Datastore_parent" nameKey="288"
-				                   dataType="string" isProperty="true"
-				                   defaultMonitored="true" isDiscrete="false"
-				                   keyAttribute="false" isRate="false"
-				                   hidden="false"/>
 			</ResourceGroup>
 		</ResourceKind>
 

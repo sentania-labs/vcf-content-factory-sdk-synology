@@ -1,5 +1,55 @@
 # Changelog
 
+## 0.0.0.26 (2026-07-02)
+
+- feat(synology): build 26 — **the convergence build** (design-of-record:
+  `designs/stitcher-identity-v3-adapter-credentials.md`; `context/defects.md`
+  DEF-006). Combines a framework re-pull with two adapter-source changes.
+  This is the build that goes to the prod CP fixture to close DEF-006.
+  1. **Inherited (framework, no adapter action — rides in via the rebuilt
+     `adapter_framework/` jar):** ambient identity v3 — injected
+     per-instance credential first, then `automationuser.properties`, then
+     `maintenanceuser.properties` — with the `file=instance` selection log
+     and the `instance-credential not used reason=…` breadcrumb.
+     `AmbientCredential`/`SuiteApiStitchClient` live in
+     `vcfops_managementpacks/adapter_framework/`, not in this adapter's
+     `src/`; no synology source references them directly. Reviews:
+     `context/reviews/framework/ambient-credential-v3-instance-first.md` +
+     `-closeout.md`.
+  2. **NFS NIC-selection fix (build-25 finding):** the only code path in
+     this adapter that ever picked a single NAS IP
+     (`SynologyStitcher.connectedNasIps(...).get(0)`) was the build-25
+     experimental `relationships|Datastore_parent` property emission in
+     `collectNfsExport` — the first connected interface (`.51`) is not
+     necessarily the one ESXi mounted via (`.52`), so that constructed
+     `<ip>/<export>` candidate could never match the real datastore
+     identity. That code is removed in this build (see #3), which
+     eliminates the bug at its only source. The **runtime credentialed
+     cross-link** (`SynologyAdapter#emitDatastoreCrossLink` →
+     `SynologyStitcher#matchByPath`, build 16/18) was never affected: it
+     already iterates every entry from `connectedNasIps(...)` and tries
+     `nfsDataStorePath(ip, volPath, name)` for each one, matching against
+     real VMWARE Datastore inventory
+     (`content/sdk-adapters/synology/src/com/vcfcf/adapters/synology/
+     SynologyAdapter.java`, `emitDatastoreCrossLink`, NFS loop). The
+     LUN/VMFS path is unaffected either way — `lunDataStorePath` keys off
+     the LUN's own UUID→NAA transform, no NIC dependency.
+  3. **Removed the build-25 experiment (proven inert):** deleted the
+     `relationships|Datastore_parent` property emission from
+     `collectIscsiLun`/`collectNfsExport`
+     (`SynologyAdapter.java`), the `relationships` `ResourceGroup` +
+     `Datastore_parent` `ResourceAttribute` blocks from `describe.xml`
+     (both `SynologyIscsiLun` and `SynologyNfsExport`), and nameKeys
+     285-288 from `resources/resources.properties`. Platform evidence: no
+     property→edge code path exists
+     (`context/investigations/platform-edge-engine-2026-07-02.md`). The
+     pre-existing (build-18) `TraversalSpecKind` cross-MP navigation hops
+     for `VMWARE::Datastore::~child` are untouched — harmless navigation
+     metadata, unrelated to the deleted property mechanism.
+  - Devel build feeding the prod CP fixture — no `v*` release tag yet.
+    Per RULE-014 (`rules/pak-version-lines.md`) this hand build is
+    expected to stamp `0.0.0.26`.
+
 ## 0.0.0.25 (2026-07-02)
 
 - feat(synology): build 25 — **EXPERIMENT for DEF-006**

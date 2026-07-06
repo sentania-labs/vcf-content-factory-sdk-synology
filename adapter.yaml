@@ -1,6 +1,6 @@
 name: "VCF Content Factory Synology DiskStation"
 version: "1.0.0"
-build_number: 27
+build_number: 28
 adapter_kind: "synology_diskstation"
 tier: 2
 description: >
@@ -30,6 +30,6 @@ cross_mp_edges:
     foreign_adapter_kind: VMWARE
     description: >
       NFS export attached under the backing VMWARE Datastore (matched by
-      computed <nas_ip>/<vol_path>/<share> path per connected NAS
+      computed `<nas_ip>/<vol_path>/<share>` path per connected NAS
       interface); additive parentForeign edge via Suite API, deduped so a
       single Datastore never gets the same export as a duplicate child.

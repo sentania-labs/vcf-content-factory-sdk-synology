@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.0.28 (2026-07-06)
+
+- fix(synology): build 28 — reviewer NIT from build 27 (`context/reviews/synology-build-27.md`): backtick the `<nas_ip>/<vol_path>/<share>` placeholder in the NFS `cross_mp_edges` description so GitHub-rendered markdown doesn't strip the angle-bracket tokens down to "computed  //  path"; matches how `docs/overview.md:63` already renders it. Docs-only.
+
 ## 0.0.0.27 (2026-07-06)
 
 - feat(synology): build 27 — docs-only. Adds the `cross_mp_edges`

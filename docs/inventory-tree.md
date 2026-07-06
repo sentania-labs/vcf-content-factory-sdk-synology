@@ -1,6 +1,6 @@
 # Inventory Tree — VCF Content Factory Synology DiskStation
 
-> Generated from `describe.xml` v1.0.0.27. Do not edit — regenerated on every build.
+> Generated from `describe.xml` v1.0.0.28. Do not edit — regenerated on every build.
 
 **Traversal Spec:** Synology DiskStation Storage Tree
 
@@ -41,4 +41,4 @@ These edges are created at collection time via the Suite API and never appear in
 | Parent | Child | Description |
 |--------|-------|-------------|
 | *VMWARE Datastore* (foreign, VMWARE) | `SynologyIscsiLun` | iSCSI LUN attached under the backing VMWARE Datastore (matched by computed VMFS extent NAA path); additive parentForeign edge via Suite API, resolved against real inventory only (no phantom Datastore minted when no match exists). One path can back N datastores (one per vCenter view) — bound to every copy. |
-| *VMWARE Datastore* (foreign, VMWARE) | `SynologyNfsExport` | NFS export attached under the backing VMWARE Datastore (matched by computed <nas_ip>/<vol_path>/<share> path per connected NAS interface); additive parentForeign edge via Suite API, deduped so a single Datastore never gets the same export as a duplicate child. |
+| *VMWARE Datastore* (foreign, VMWARE) | `SynologyNfsExport` | NFS export attached under the backing VMWARE Datastore (matched by computed `<nas_ip>/<vol_path>/<share>` path per connected NAS interface); additive parentForeign edge via Suite API, deduped so a single Datastore never gets the same export as a duplicate child. |

@@ -28,7 +28,7 @@ These edges are created at collection time via the Suite API and never appear in
 ## Quick Reference
 
 - **Adapter kind:** `synology_diskstation`
-- **Version:** 1.0.0.28
+- **Version:** 1.0.0.30
 - **Traversal spec:** Synology DiskStation Storage Tree
 - **Resource kinds:** 9
 - **Cross-MP relationships:** 2 (see [Cross-MP Relationships](#cross-mp-relationships) below)

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0.30 (2026-08-18)
+
+- fix: Allow Insecure SSL now ignores certificate hostname mismatches (issue #5). No adapter source change: rebuilt against sdk-buildkit v1.0.10, which fixes vcf-content-factory#82 (`insecureSslContext()` reimplemented as `X509ExtendedTrustManager` so JSSE no longer re-arms the endpoint identity check). Build 29 was pulled: it was tagged without the `build_number` bump, so its pak was stamped 1.0.0.28 and version-indistinguishable from the prior release.
+
 ## 0.0.0.28 (2026-07-06)
 
 - fix(synology): build 28 — reviewer NIT from build 27 (`context/reviews/synology-build-27.md`): backtick the `<nas_ip>/<vol_path>/<share>` placeholder in the NFS `cross_mp_edges` description so GitHub-rendered markdown doesn't strip the angle-bracket tokens down to "computed  //  path"; matches how `docs/overview.md:63` already renders it. Docs-only.

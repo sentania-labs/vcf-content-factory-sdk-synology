@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Allow Unsigned PAK Installation** turned on in VCF Operations (the pak is unsigned); see [Installing: allow unsigned paks first](../README.md#installing-allow-unsigned-paks-first).
+- **Allow Unsigned PAK Installation** on for every install or upgrade of this unsigned pak on VCF Operations 9.0 and 9.1 (8.x is unverified); see [Installing: allow unsigned paks first](../README.md#installing-allow-unsigned-paks-first).
 - VCF Operations 8.x or 9.x (collect-path discovery is validated on
   9.0.2).
 - A Synology DiskStation running **DSM 7.2 or later**.
@@ -57,7 +57,7 @@ for:
 
 ## Step-by-Step Installation
 
-1. Install the `.pak` file via **Administration > Solutions > Add**.
+1. Install the `.pak` file via **Administration > Integrations > Repository > Add**.
 2. After installation, navigate to **Data Sources > Integrations > Accounts**.
 3. Click **Add Account** and select **VCF Content Factory Synology DiskStation**.
 4. Fill in the configuration fields above (host, port `5001`, DSM

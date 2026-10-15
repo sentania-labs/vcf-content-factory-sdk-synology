@@ -308,9 +308,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 * running on it never logs in again, then its session is logged out in
 	 * one attempt bounded by {@link #LOGOUT_TIMEOUT}), then discards the
 	 * Suite API stitcher. Best effort: every step runs, a failure is one
-	 * WARN, nothing is thrown. Null arguments are skipped. The HTTP client
-	 * is the framework's to discard (review NIT-1): its onConfigure does it
-	 * before configureAdapter, and super.onDiscard() on discard.
+	 * WARN, nothing is thrown. Null arguments are skipped. The main HTTP
+	 * client is the framework's to discard (review NIT-1): its onConfigure
+	 * does it before configureAdapter, and super.onDiscard() on discard. The
+	 * dedicated logout client is discarded by the API client's close
+	 * (Codex P2).
 	 */
 	private void releaseConfiguration(String why, Configured c,
 			SuiteApiStitcher st) {

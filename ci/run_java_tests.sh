@@ -20,3 +20,4 @@ for t in AllowInsecureTest SnapshotCacheTest SnapshotTimingTest \
 done
 python3 tests/test_allow_insecure_default.py
 python3 tests/test_snapshot_logger_once.py
+python3 tests/test_logout_client_discard.py

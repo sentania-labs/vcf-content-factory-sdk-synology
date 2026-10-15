@@ -57,7 +57,12 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 		this.username = username;
 		this.password = password;
 		this.log = log;
-		this.session = new DsmSession(this::sendLogin, this::sendLogout);
+		// Codex P2: a dedicated logout client is discarded on close (after
+		// the logout attempt, with or without a session). When it is the
+		// main client (the tester), the main client is not ours to discard.
+		this.session = new DsmSession(this::sendLogin, this::sendLogout,
+				logoutHttp != null && logoutHttp != http
+						? logoutHttp::discard : null);
 	}
 
 	// --- Session management ---
@@ -102,7 +107,9 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	/**
 	 * Build 31 (review W5): closes the client for good (no login after
 	 * this, so a cycle still running on it cannot re-login), then logs the
-	 * session out over {@link #logoutHttp}, best effort. Never throws.
+	 * session out over {@link #logoutHttp}, best effort, then discards
+	 * {@link #logoutHttp} when it is a dedicated client (Codex P2), with or
+	 * without a session and even when the logout failed. Never throws.
 	 */
 	public void close() {
 		session.close();

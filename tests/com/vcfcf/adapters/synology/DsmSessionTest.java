@@ -35,6 +35,7 @@ public final class DsmSessionTest {
 		closeAfterTheLoginCheckWaitsAndLogsOut();
 		concurrentLoginAndCloseLeaveNoSession();
 		closedEndsTheBuildAsError();
+		closeReleasesTheLogoutClient();
 		System.out.println("DsmSessionTest: all assertions passed");
 	}
 
@@ -194,5 +195,81 @@ public final class DsmSessionTest {
 				+ "misleading 'optional endpoint not readable' WARN)");
 		T.check(!SynologyFailures.isUnreachable(closed), "ERROR, not DOWN");
 		T.eq(0, SynologyFailures.authCode(closed), "not a login refusal");
+	}
+
+	/**
+	 * Codex P2: the dedicated logout client is released on close, after the
+	 * logout attempt, with a session, without one, and when the logout
+	 * throws; once, however often close is called; and a throwing release
+	 * never escapes close. tests/test_logout_client_discard.py pins the
+	 * API client's wiring (logoutHttp::discard, never the main client).
+	 */
+	static void closeReleasesTheLogoutClient() throws Exception {
+		// With a session: logout first, then release.
+		List<String> order = new ArrayList<>();
+		DsmSession withSid = new DsmSession(() -> "sid1",
+				sid -> order.add("logout " + sid), () -> order.add("release"));
+		withSid.ensure();
+		withSid.close();
+		T.eq(List.of("logout sid1", "release"), order,
+				"logout, then the logout client is released");
+		withSid.close();
+		T.eq(2, order.size(), "a second close does not release again");
+
+		// Without a session: nothing to log out, still released.
+		int[] released = {0};
+		DsmSession noSid = new DsmSession(() -> "x", sid -> {
+			throw new AssertionError("no session, no logout");
+		}, () -> released[0]++);
+		noSid.close();
+		T.eq(1, released[0], "released with no session");
+
+		// The logout throws: still released, close does not throw.
+		int[] released2 = {0};
+		DsmSession throwing = new DsmSession(() -> "sid1", sid -> {
+			throw new IllegalStateException("logout bug");
+		}, () -> released2[0]++);
+		throwing.ensure();
+		throwing.close();
+		T.eq(1, released2[0], "released after a throwing logout");
+		T.check(throwing.isClosed(), "closed after a throwing logout");
+
+		// The logout throws an Error (not caught by logoutQuietly): the
+		// release still runs, then the Error propagates as before.
+		int[] released3 = {0};
+		DsmSession erroring = new DsmSession(() -> "sid1", sid -> {
+			throw new NoSuchMethodError("transport drift");
+		}, () -> released3[0]++);
+		erroring.ensure();
+		try {
+			erroring.close();
+		} catch (NoSuchMethodError expected) {
+			// as before this change
+		}
+		T.eq(1, released3[0], "released even when the logout throws an Error");
+
+		// The release itself throws: close still returns normally.
+		DsmSession badRelease = new DsmSession(() -> "sid1", sid -> { },
+				() -> {
+					throw new IllegalStateException("discard bug");
+				});
+		badRelease.ensure();
+		badRelease.close(); // must not throw
+		T.check(badRelease.isClosed(), "closed even when the release throws");
+
+		// A login in flight when close runs: its session is still logged
+		// out, and the release ran exactly once.
+		FakeNas nas = new FakeNas();
+		int[] released4 = {0};
+		DsmSession inFlight = new DsmSession(nas::login, nas.logouts::add,
+				() -> released4[0]++);
+		nas.duringLogin = inFlight::close;
+		try {
+			inFlight.ensure();
+		} catch (SynologyClientClosedException expected) {
+			// expected
+		}
+		T.eq(List.of("sid1"), nas.logouts, "the in-flight session is logged out");
+		T.eq(1, released4[0], "released once");
 	}
 }

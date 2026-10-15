@@ -32,6 +32,14 @@ import java.io.IOException;
  *
  * <p>The logout call itself is the client's to bound (a single attempt
  * with a short timeout); it must not throw.
+ *
+ * <p><b>The logout transport is released on close (Codex P2).</b> The
+ * optional release step (the API client passes its dedicated logout HTTP
+ * client's {@code discard}) runs once, on the first {@link #close}, after
+ * the logout attempt, whether or not there was a session and whether or
+ * not the logout threw. Before, every configure built a logout client
+ * that nothing discarded, one leaked client per reconfigure or removal.
+ * A fault in the release step is swallowed: close never throws.
  */
 final class DsmSession {
 
@@ -47,6 +55,8 @@ final class DsmSession {
 
 	private final Login loginCall;
 	private final Logout logoutCall;
+	/** Codex P2: releases the logout transport on close; may be null. */
+	private final Runnable release;
 	private final Object lock = new Object();
 	private volatile String sid;
 	private volatile boolean closed;
@@ -57,8 +67,18 @@ final class DsmSession {
 	volatile Runnable beforeStore;
 
 	DsmSession(Login loginCall, Logout logoutCall) {
+		this(loginCall, logoutCall, null);
+	}
+
+	/**
+	 * @param release run once on the first {@link #close}, after the
+	 *                logout attempt (Codex P2: discards the dedicated
+	 *                logout HTTP client); may be {@code null}
+	 */
+	DsmSession(Login loginCall, Logout logoutCall, Runnable release) {
 		this.loginCall = loginCall;
 		this.logoutCall = logoutCall;
+		this.release = release;
 	}
 
 	/** The current session id, or {@code null}. */
@@ -110,15 +130,31 @@ final class DsmSession {
 		if (s != null) logoutQuietly(s);
 	}
 
-	/** Closes the client for good: no login after this, then logout. */
+	/**
+	 * Closes the client for good: no login after this, then logout, then
+	 * (first close only) the release step.
+	 */
 	void close() {
 		String s;
+		boolean first;
 		synchronized (lock) {
+			first = !closed;
 			closed = true;
 			s = sid;
 			sid = null;
 		}
-		if (s != null) logoutQuietly(s);
+		try {
+			if (s != null) logoutQuietly(s);
+		} finally {
+			if (first && release != null) {
+				try {
+					release.run();
+				} catch (RuntimeException | LinkageError ignored) {
+					// Best effort: a failed release must not escape
+					// configure or discard.
+				}
+			}
+		}
 	}
 
 	private void logoutQuietly(String s) {

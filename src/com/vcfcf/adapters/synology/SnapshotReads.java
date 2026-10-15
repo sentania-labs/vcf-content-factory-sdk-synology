@@ -28,6 +28,15 @@ import java.util.function.Consumer;
  * endpoint per configuration until the endpoint is readable again (then
  * one INFO), so a scoped account does not WARN every cycle.
  *
+ * <p><b>Not installed is not unread (review W4).</b> The iSCSI LUN and
+ * target lists answer DSM error 102 (the API does not exist) on a NAS
+ * without iSCSI (SAN Manager not installed). That is a definite answer, no
+ * LUNs and no targets, so it is stored as the empty value and counted as
+ * read, with one INFO per configuration: Volume relationships keep
+ * refreshing on such a NAS. Only these list endpoints get this, because for
+ * them the empty value means "none"; for FanSpeed or the NFS service an
+ * empty value would publish defaults, so 102 there stays unread.
+ *
  * <p>Three failures of an optional read still fail the build: an
  * interrupt, a DSM login refusal (the session expired and the re-login was
  * refused; carrying on would send one more failed login per remaining
@@ -104,7 +113,16 @@ final class SnapshotReads {
 		}
 	}
 
+	/**
+	 * Review W4: the optional list endpoints whose DSM error 102 (the API
+	 * does not exist on this NAS) is read as an empty list.
+	 */
+	static final Set<String> EMPTY_WHEN_NOT_INSTALLED =
+			Collections.unmodifiableSet(new HashSet<>(
+					java.util.Arrays.asList(LUNS, TARGETS)));
+
 	private final Set<String> warned = new HashSet<>();
+	private final Set<String> notInstalled = new HashSet<>();
 
 	/**
 	 * Reads every endpoint once, in the build 30 order.
@@ -148,6 +166,7 @@ final class SnapshotReads {
 			boolean recovered;
 			synchronized (this) {
 				recovered = warned.remove(endpoint);
+				notInstalled.remove(endpoint);
 			}
 			if (recovered) {
 				info.accept("Optional DSM endpoint " + endpoint
@@ -161,6 +180,25 @@ final class SnapshotReads {
 			if (SynologyFailures.authCode(e) != 0
 					|| SynologyFailures.isConnectFailure(e)) {
 				throw e;
+			}
+			if (EMPTY_WHEN_NOT_INSTALLED.contains(endpoint)
+					&& SynologyFailures.dataApiCode(e)
+							== SynologyFailures.API_NOT_FOUND) {
+				boolean first;
+				synchronized (this) {
+					warned.remove(endpoint);
+					first = notInstalled.add(endpoint);
+				}
+				if (first) {
+					info.accept("DSM endpoint " + endpoint + " does not exist "
+							+ "on this NAS (DSM error 102: the package that "
+							+ "provides it is not installed). Read as an empty "
+							+ "list (no " + (LUNS.equals(endpoint) ? "iSCSI LUNs"
+									: "iSCSI targets") + "); Volume relationships "
+							+ "are still refreshed. Logged once until it exists "
+							+ "again.");
+				}
+				return empty;
 			}
 			String reason = SynologyFailures.describe(e);
 			r.unread.put(endpoint, reason);

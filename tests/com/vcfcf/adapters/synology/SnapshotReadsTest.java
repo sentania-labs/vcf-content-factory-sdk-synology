@@ -68,6 +68,7 @@ public final class SnapshotReadsTest {
 		requiredFailureFailsTheBuild();
 		loginRefusalAndConnectFailureStillFailTheBuild();
 		checkpointRunsBeforeEveryCall();
+		iscsiNotInstalledIsAnEmptyRead();
 		System.out.println("SnapshotReadsTest: all assertions passed");
 	}
 
@@ -220,6 +221,82 @@ public final class SnapshotReadsTest {
 		} catch (InterruptedException expected) {
 			// expected
 		}
+	}
+
+	/** What SynologyApiClient.call throws for a refused data API call. */
+	private static SynologyDsmException dsm(String endpoint, int code) {
+		return new SynologyDsmException(endpoint + " list failed: "
+				+ "{\"error\":{\"code\":" + code + "},\"success\":false}",
+				code, false);
+	}
+
+	/**
+	 * Review W4: a NAS without iSCSI answers DSM error 102 (the API does
+	 * not exist). That is "no LUNs, no targets", a read, so Volume
+	 * relationships keep refreshing (SSD caches and NFS exports attach to
+	 * their Volume) instead of freezing forever.
+	 */
+	static void iscsiNotInstalledIsAnEmptyRead() throws Exception {
+		SnapshotReads reads = new SnapshotReads(); // one configuration
+		FakeNas nas = new FakeNas();
+		nas.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 102));
+		nas.failing.put(SnapshotReads.TARGETS, dsm(SnapshotReads.TARGETS, 102));
+		List<String> warns = new ArrayList<>();
+		List<String> infos = new ArrayList<>();
+		SnapshotReads.Result<String> r = read(reads, nas, warns, infos,
+				new ArrayList<>());
+		T.check(r.unread.isEmpty(), "102 is not unread: " + r.unread);
+		T.eq(EMPTY, r.lunList, "the LUN list is the empty list");
+		T.eq(EMPTY, r.targets, "the target list is the empty list");
+		T.check(SnapshotIsolation.volumeChildrenKnown(r.unread,
+				java.util.Collections.emptyMap()),
+				"so Volume children are known and Volumes are parents");
+		T.eq(0, warns.size(), "no WARN for a package that is not installed");
+		T.eq(2, infos.size(), "one INFO per endpoint: " + infos);
+		T.check(infos.get(0).contains("102")
+				&& infos.get(0).contains(SnapshotReads.LUNS),
+				"the INFO names the endpoint and the code: " + infos.get(0));
+		read(reads, nas, warns, infos, new ArrayList<>());
+		T.eq(2, infos.size(), "logged once per configuration");
+
+		// Any other refusal of the LUN list (a missing privilege, 105) is
+		// still unread: the permanent case docs/installing.md names.
+		FakeNas scoped = new FakeNas();
+		scoped.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 105));
+		SnapshotReads.Result<String> s = read(new SnapshotReads(), scoped,
+				new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+		T.check(!s.isRead(SnapshotReads.LUNS), "105 on the LUN list is unread");
+		T.check(!SnapshotIsolation.volumeChildrenKnown(s.unread,
+				java.util.Collections.emptyMap()), "and Volumes are frozen");
+
+		// 102 on an endpoint whose empty value would publish defaults stays
+		// unread (no Fan "unknown", no NFS "false").
+		for (String e : new String[] {SnapshotReads.FAN,
+				SnapshotReads.NFS_SERVICE, SnapshotReads.SHARES,
+				SnapshotReads.NICS, SnapshotReads.CONNECTIONS}) {
+			FakeNas other = new FakeNas();
+			other.failing.put(e, dsm(e, 102));
+			SnapshotReads.Result<String> o = read(new SnapshotReads(), other,
+					new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+			T.check(!o.isRead(e), e + ": 102 stays unread");
+		}
+
+		// A login refusal that happens to carry 102 is not "not installed".
+		FakeNas login = new FakeNas();
+		login.failing.put(SnapshotReads.LUNS, new SynologyDsmException(
+				"Synology login failed: error code 102", 102, true));
+		SnapshotReads.Result<String> l = read(new SnapshotReads(), login,
+				new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+		T.check(!l.isRead(SnapshotReads.LUNS), "a login 102 is unread");
+
+		// Installed later: read normally, and a new 102 is logged again.
+		nas.failing.clear();
+		SnapshotReads.Result<String> after = read(reads, nas, warns, infos,
+				new ArrayList<>());
+		T.eq(SnapshotReads.LUNS, after.lunList, "read once it exists");
+		nas.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 102));
+		read(reads, nas, warns, infos, new ArrayList<>());
+		T.eq(3, infos.size(), "a new 102 after it existed is logged again");
 	}
 
 	static void checkpointRunsBeforeEveryCall() throws Exception {

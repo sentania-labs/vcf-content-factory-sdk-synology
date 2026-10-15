@@ -134,8 +134,12 @@ normally — collection is never failed over the optional cross-link.
   (existing LUN or NFS export objects that depend on it are ERROR each
   cycle, with the framework's own log line for each); the DiskStation,
   pools, volumes, disks and SSD caches are still discovered and
-  collected. See docs/installing.md for the endpoint table and the minimum
-  DSM privileges.
+  collected. A NAS without iSCSI answers DSM error 102 (the API does not
+  exist), which is read as no LUNs and no targets, so Volume relationships
+  still refresh there. A permanent refusal of the LUN or share list (a
+  missing privilege) leaves Volume relationships unrefreshed until the
+  account can read it. See docs/installing.md for the endpoint table and
+  the minimum DSM privileges.
 
 - **Editing the instance releases the old DSM session (build 31).** A
   reconfigure (password change, TLS toggle, host change) logs the previous

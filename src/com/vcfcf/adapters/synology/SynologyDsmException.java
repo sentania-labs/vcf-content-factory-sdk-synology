@@ -10,7 +10,10 @@ import java.io.IOException;
  * other failure without parsing message text. The same code number means
  * different things for different APIs (400 on {@code SYNO.API.Auth} is a
  * wrong password, on another API it is that API's own error), so
- * {@link #isLogin()} records whether the refused call was the login. The
+ * {@link #isLogin()} records whether the refused call was the login. Build
+ * 31 (review W4): a refused data API call is typed too, with
+ * {@code login=false}, so code 102 (the API does not exist on this NAS) can
+ * be read as "not installed". The
  * message carries the endpoint label and the code only, never a URL, a
  * password or a session id.
  */

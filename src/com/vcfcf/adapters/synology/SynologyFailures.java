@@ -47,6 +47,28 @@ final class SynologyFailures {
 	}
 
 	/**
+	 * Review W4: DSM's common error code "the requested API does not exist".
+	 * A data API answers it when the package that provides it is not
+	 * installed on this NAS (iSCSI without SAN Manager, for example).
+	 */
+	static final int API_NOT_FOUND = 102;
+
+	/**
+	 * Review W4: the DSM error code of the first refused data API call (not
+	 * the login) in {@code t}'s cause chain, or 0 when there is none.
+	 */
+	static int dataApiCode(Throwable t) {
+		Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+		for (Throwable c = t; c != null && seen.add(c); c = c.getCause()) {
+			if (c instanceof SynologyDsmException
+					&& !((SynologyDsmException) c).isLogin()) {
+				return ((SynologyDsmException) c).code();
+			}
+		}
+		return 0;
+	}
+
+	/**
 	 * Issue #13: whether {@code t} means the NAS could not be reached, so the
 	 * resource is DOWN (the target is down) rather than ERROR (something is
 	 * wrong with the adapter, its credentials or its data). True when the

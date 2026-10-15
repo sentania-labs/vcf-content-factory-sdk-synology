@@ -62,6 +62,21 @@ rule probe of any share fails, no Volume relationships are refreshed (a
 Volume's LUN, NFS export and SSD cache edges stay as they were), so a
 temporary failure does not detach them.
 
+A NAS without iSCSI (SAN Manager not installed) answers the iSCSI LUN and
+target lists with DSM error 102 (the API does not exist). The adapter
+reads that as "no LUNs, no targets", logs one INFO per instance
+configuration, and keeps refreshing Volume relationships, so SSD caches
+and NFS exports still attach to their Volume.
+
+The case that stays frozen is a permanent refusal: an account without the
+privilege to read the LUN list or the share list (DSM error 105, for
+example), or a share whose NFS rule probe is always refused. Then Volume
+relationships are never refreshed: a new SSD cache or NFS export is not
+attached to its Volume, and a removed or moved SSD cache keeps its old
+Volume edge, until the account can read them. The `Optional DSM endpoint
+... is not readable` WARN and the per-share probe WARN name the cause. Use
+an administrators-group account (see above).
+
 > **Session note:** the adapter manages its own DSM session. It logs in to
 > obtain a `_sid` session token, passes `_sid` on every Web API call, and
 > re-authenticates automatically when DSM reports the session expired (DSM

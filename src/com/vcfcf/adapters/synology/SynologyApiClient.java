@@ -182,7 +182,13 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 				resp = callRaw(synoUrl(api, version, method, extra), endpoint);
 			}
 			if (!resp.isSuccess()) {
-				throw new IOException(api + " " + method + " failed: " + resp.asString());
+				// Build 31 (review W4): typed with the data API's DSM error
+				// code (login=false, so it never counts as a login refusal),
+				// so SnapshotReads can tell "this API does not exist on this
+				// NAS" (102) from any other failure. Same message as before.
+				throw new SynologyDsmException(api + " " + method + " failed: "
+						+ resp.asString(),
+						(int) resp.get("error").get("code").asLong(), false);
 			}
 		}
 		return resp;

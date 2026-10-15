@@ -125,7 +125,11 @@ normally — collection is never failed over the optional cross-link.
   answers the required reads and then stops answering ends the build at
   the first optional read or NFS share probe that times out, instead of
   each remaining call waiting out its own timeouts. Stop Collecting
-  ends a snapshot build between DSM calls. The HTTP connect and read
+  ends a snapshot build between DSM calls; if the stop lands while one
+  resource's own collect is building the snapshot, that resource shows
+  ERROR until its next cycle, because the framework sets a status on
+  every resource whose collect throws and offers no "stopped" outcome.
+  The HTTP connect and read
   timeouts are one 30 s value, because the framework HTTP client offers
   no separate connect timeout.
 

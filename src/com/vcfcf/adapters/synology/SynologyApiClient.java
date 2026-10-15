@@ -212,8 +212,12 @@ public final class SynologyApiClient {
 			// from the endpoint label only; redact any message text and DO NOT chain
 			// the raw cause (a chained cause re-exposes getCause().getMessage() to
 			// the framework logger). See rules/no-secrets-on-disk.md.
-			throw new IOException("transport error calling " + endpoint + ": "
-					+ redact(String.valueOf(e.getMessage())));
+			// Build 31 (issue #13): keep the failure's class (connect, timeout,
+			// other) as a field instead, so an unreachable NAS maps to DOWN and
+			// a connect failure stops the snapshot build.
+			throw new SynologyTransportException("transport error calling "
+					+ endpoint + ": " + redact(String.valueOf(e.getMessage())),
+					SynologyFailures.classifyTransport(e));
 		}
 		if (resp.statusCode() != 200) {
 			throw new IOException("HTTP " + resp.statusCode() + " from " + endpoint);

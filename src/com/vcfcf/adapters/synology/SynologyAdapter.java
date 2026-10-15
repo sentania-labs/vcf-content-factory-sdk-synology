@@ -102,10 +102,16 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	/**
 	 * Per-cycle snapshot of the Synology API responses, shared across all
 	 * per-resource {@code collect()} calls within one collection cycle, lives in
-	 * the {@link SnapshotCache} of the current {@link Configured} holder. A
-	 * snapshot older than this is rebuilt.
+	 * the {@link SnapshotCache} of the current {@link Configured} holder.
+	 *
+	 * <p>Build 31 (issue #13): one build per collection cycle. The cycle, not
+	 * the clock, decides reuse; this age (counted from the end of the build)
+	 * is only a safety net that rebuilds a snapshot in a cycle that has run
+	 * this long. Before build 31 the snapshot was rebuilt after 60 s counted
+	 * from the start of its build, so a build slower than 60 s was rebuilt by
+	 * every resource.
 	 */
-	private static final long MIN_REFRESH_INTERVAL_MS = 60_000L;
+	private static final long MAX_SNAPSHOT_AGE_MS = 15L * 60_000L;
 
 	/**
 	 * Build 31 (issue #12): after a failed snapshot build that is not an
@@ -170,7 +176,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				new SynologyApiClient(httpClient, cfg.username, cfg.password,
 						componentLogger(SynologyApiClient.class)),
 				new SnapshotCache<>(System::currentTimeMillis,
-						MIN_REFRESH_INTERVAL_MS, FAILURE_RETRY_BACKOFF_MS,
+						MAX_SNAPSHOT_AGE_MS, FAILURE_RETRY_BACKOFF_MS,
 						AUTH_FAILURE_BACKOFF_MS, MAX_AUTH_FAILURE_BACKOFF_MS));
 
 		// Optional Datastore cross-link transport (build 16; explicit-creds
@@ -259,6 +265,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				suiteApiUrl, suiteApiUser, suiteApiPassword);
 	}
 
+	/**
+	 * Build 31 (issue #13): the timeout stays one 30 s value for connect and
+	 * read because the framework {@link HttpClientBuilder} exposes only
+	 * {@code timeout(Duration)}, applied to both. What bounds a cycle against
+	 * an unreachable NAS is the {@link SnapshotCache}: at most one snapshot
+	 * build per cycle, a connect failure ends that build, and the other
+	 * resources fail from the cached result.
+	 */
 	private ManagedHttpClient buildHttpClient(SynologyConfig cfg) {
 		HttpClientBuilder b = HttpClientBuilder.builder()
 				.baseUrl(cfg.baseUrl())
@@ -516,9 +530,19 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				}
 			}
 
+			/**
+			 * Build 31 (issue #13): DOWN when the NAS could not be reached
+			 * (connect refused, connect or request timeout, unknown host, no
+			 * route), found anywhere in the cause chain, including a cached
+			 * snapshot failure. ERROR for DSM login refusals, certificate
+			 * failures, unreadable payloads and anything else. Before build
+			 * 31 only a bare ConnectException was DOWN, and the API client
+			 * never threw one (it rethrows every transport failure as an
+			 * IOException), so an unreachable NAS was always ERROR.
+			 */
 			@Override
 			public ResourceStatusEnum mapCollectException(Exception e) {
-				if (e instanceof java.net.ConnectException) {
+				if (SynologyFailures.isUnreachable(e)) {
 					return ResourceStatusEnum.RESOURCE_STATUS_DOWN;
 				}
 				return ResourceStatusEnum.RESOURCE_STATUS_ERROR;
@@ -527,10 +551,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	}
 
 	/**
-	 * Return the snapshot for this cycle, refreshing it if it is null or older
-	 * than {@link #MIN_REFRESH_INTERVAL_MS}. A refresh failure (session/REST
-	 * error) propagates out so the framework marks the resource ERROR/DOWN,
-	 * never a silent empty snapshot.
+	 * Return the snapshot for this cycle, building it on the cycle's first
+	 * call (or after {@link #MAX_SNAPSHOT_AGE_MS} in an endless cycle). A
+	 * refresh failure (session/REST error) propagates out so the framework
+	 * marks the resource ERROR/DOWN, never a silent empty snapshot.
 	 *
 	 * <p>Build 31 (issue #12): a failed refresh is cached by the
 	 * configuration's {@link SnapshotCache}: the remaining resources of the
@@ -547,6 +571,27 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			c.api.ensureSession();
 			return Snapshot.build(c.api, this);
 		}, this::logWarn);
+	}
+
+	/**
+	 * Build 31 (issue #13): called between DSM calls while a snapshot is
+	 * built. A thread interrupt ends the build with an
+	 * {@link InterruptedException}, which the framework turns into a cycle
+	 * abort; Stop Collecting (the framework's abort flag) ends it with a
+	 * {@link SnapshotCache.AbortedException}. Neither is cached as a NAS
+	 * failure. Without this a stop waited out every remaining call, each up
+	 * to three 30 s timeouts against a hung NAS.
+	 */
+	void checkpoint(String next) throws InterruptedException,
+			SnapshotCache.AbortedException {
+		if (Thread.currentThread().isInterrupted()) {
+			throw new InterruptedException("Synology snapshot build interrupted "
+					+ "before " + next);
+		}
+		if (isAbortRequested()) {
+			throw new SnapshotCache.AbortedException("Stop Collecting "
+					+ "requested: Synology snapshot build stopped before " + next);
+		}
 	}
 
 	private void dispatchCollect(ResourceConfig rc, Snapshot snap,
@@ -1195,7 +1240,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 * SynologyAdapter)} which logs an INFO breadcrumb of the resource counts.
 	 */
 	private static final class Snapshot {
-		final long builtAt = System.currentTimeMillis();
+		// Build 31 (issue #13): no builtAt here any more. It was a field
+		// initializer, stamped before the API calls ran; SnapshotCache now
+		// stamps the time when build() returns.
 
 		SimpleJson dsmInfo;
 		SimpleJson systemInfo;
@@ -1223,16 +1270,28 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		static Snapshot build(SynologyApiClient api, SynologyAdapter adapter)
 				throws Exception {
 			Snapshot s = new Snapshot();
+			// Build 31 (issue #13): an abort checkpoint before each DSM call.
+			adapter.checkpoint("DSM.Info");
 			s.dsmInfo = api.dsmInfo();
+			adapter.checkpoint("Core.System info");
 			s.systemInfo = api.systemInfo();
+			adapter.checkpoint("Core.System.Utilization");
 			s.utilization = api.utilization();
+			adapter.checkpoint("Core.Hardware.FanSpeed");
 			s.fanSpeed = api.fanSpeed();
+			adapter.checkpoint("Core.FileServ.NFS");
 			s.nfsService = api.nfsServiceGet();
+			adapter.checkpoint("Storage load_info");
 			s.storage = api.storageLoadInfo();
+			adapter.checkpoint("Core.ISCSI.LUN list");
 			s.lunList = api.iscsiLunList();
+			adapter.checkpoint("Core.ISCSI.Target list");
 			s.targets = api.iscsiTargetList();
+			adapter.checkpoint("Core.Network.Interface list");
 			s.networkInterfaces = api.networkInterfaceList();
+			adapter.checkpoint("Core.CurrentConnection");
 			s.connections = api.currentConnections();
+			adapter.checkpoint("Core.Share list");
 			s.shares = api.shareList();
 
 			// NIT-1 (build-15): contract-assert one required field on the two
@@ -1254,6 +1313,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 						+ "sentinel metrics published)");
 			}
 
+			adapter.checkpoint("Core.ExternalDevice.UPS");
 			try {
 				SimpleJson ups = api.upsGet();
 				if (ups.data().get("usb_ups_connect").asBoolean()) {
@@ -1283,7 +1343,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			return s;
 		}
 
-		private void buildLookups(SynologyApiClient api, SynologyAdapter adapter) {
+		private void buildLookups(SynologyApiClient api, SynologyAdapter adapter)
+				throws IOException, InterruptedException,
+				SnapshotCache.AbortedException {
 			SimpleJson diskUtil = utilization.data().get("disk");
 			if (!diskUtil.isNull()) {
 				for (SimpleJson d : diskUtil.get("disk").asList()) {
@@ -1321,12 +1383,24 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			// a probe failure skips that share rather than faking an export.
 			for (SimpleJson share : shares.data().get("shares").asList()) {
 				String name = share.get("name").asString();
+				adapter.checkpoint("NFS rule probe for share " + name);
 				try {
 					SimpleJson rules = api.nfsSharePrivilege(name);
 					if (rules.data().get("rule").size() > 0) {
 						nfsRulesByShare.put(name, rules);
 					}
+				} catch (InterruptedException ie) {
+					throw ie;
 				} catch (Exception e) {
+					// Build 31 (issue #13): the NAS stopped accepting
+					// connections. Every further probe would wait out the
+					// same timeouts, so the build fails here instead of
+					// probing each remaining share in turn.
+					if (SynologyFailures.isConnectFailure(e)) {
+						throw new IOException("NFS rule probe for share " + name
+								+ " could not connect to the NAS: "
+								+ e.getMessage(), e);
+					}
 					adapter.logWarn("Snapshot: NFS rule probe failed for share "
 							+ name + ": " + e.getMessage());
 				}

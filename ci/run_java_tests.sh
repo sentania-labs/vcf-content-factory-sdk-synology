@@ -13,7 +13,8 @@ out="$(mktemp -d)"
 trap 'rm -rf "$out"' EXIT
 javac -d "$out" -sourcepath src:tests \
     tests/com/vcfcf/adapters/synology/*.java
-for t in AllowInsecureTest SnapshotCacheTest; do
+for t in AllowInsecureTest SnapshotCacheTest SnapshotTimingTest \
+        FailureMappingTest; do
     java -cp "$out" "com.vcfcf.adapters.synology.$t"
 done
 python3 tests/test_allow_insecure_default.py

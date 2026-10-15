@@ -109,6 +109,19 @@ normally — collection is never failed over the optional cross-link.
   integrations), so a wrong password now costs a handful of failed logins
   over hours instead of one per resource per cycle. Any other failure is
   tried again on the next cycle.
+- **An unreachable NAS costs one attempt per cycle and is DOWN (build
+  31).** The DSM snapshot is built at most once per collection cycle,
+  however many objects the NAS has and however long the build takes. When
+  the NAS cannot be reached (connection refused, connect or request
+  timeout, unknown host name, no route), the first object pays the
+  timeouts once and every other object fails at once from the cached
+  result, so the cycle stays inside the 5-minute interval (before build
+  31 each of about 25 objects waited out its own timeouts, close to 40
+  minutes per cycle). The objects are marked DOWN; a refused login, a
+  certificate failure or an unreadable answer is ERROR. Stop Collecting
+  ends a snapshot build between DSM calls. The HTTP connect and read
+  timeouts are one 30 s value, because the framework HTTP client offers
+  no separate connect timeout.
 
 ## Known Limitations
 

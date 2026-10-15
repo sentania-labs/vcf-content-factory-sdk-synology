@@ -16,7 +16,7 @@ import java.util.List;
 public final class SnapshotCacheTest {
 
 	private static final long MIN = 60_000L;
-	private static final long MAX_AGE = MIN;
+	private static final long MAX_AGE = 15 * MIN;
 	private static final long RETRY = MIN;
 	private static final long AUTH = 15 * MIN;
 	private static final long AUTH_MAX = 60 * MIN;

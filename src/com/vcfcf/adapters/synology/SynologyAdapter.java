@@ -1025,17 +1025,6 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	private Relationships buildRelationships(Snapshot s) {
 		RelationshipBuilder rb = new RelationshipBuilder(ADAPTER_KIND);
-		SimpleJson storage = s.storage;
-
-		String serial = s.dsmInfo.data().get("serial").asString("unknown");
-		String dsModel = s.dsmInfo.data().get("model").asString("");
-		String dsName = dsModel.isEmpty() ? serial : dsModel + " " + serial;
-
-		ResourceKey world = rb.resource("SynologyWorld", "Synology World",
-				"world_id", "synology_world");
-		ResourceKey diskstation = rb.resource("SynologyDiskstation", dsName,
-				"serial", serial);
-		rb.parent(world, diskstation);
 
 		// Build 31 (issue #14): own-adapter parents are full-set (the platform
 		// replaces a parent's children with what is emitted). A Volume's
@@ -1052,132 +1041,22 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					+ " not read");
 		}
 
-		// disk id -> human name
-		Map<String, String> diskNames = new HashMap<>();
-		for (SimpleJson disk : storage.data().get("disks").asList()) {
-			diskNames.put(disk.get("id").asString(),
-					disk.get("name").asString(disk.get("id").asString()));
-		}
-
-		for (SimpleJson pool : storage.data().get("storagePools").asList()) {
-			String poolId = pool.get("id").asString();
-			String poolPath = pool.get("pool_path").asString();
-			ResourceKey poolKey = rb.resource("SynologyStoragePool",
-					poolDisplayName(pool), "pool_id", poolId);
-			rb.parent(diskstation, poolKey);
-
-			for (SimpleJson vol : storage.data().get("volumes").asList()) {
-				if (poolPath.equals(vol.get("pool_path").asString())) {
-					String volId = vol.get("volume_id").asString(vol.get("vol_path").asString());
-					rb.parent(poolKey, rb.resource("SynologyVolume",
-							volumeDisplayName(vol), "volume_id", volId));
-				}
-			}
-
-			SimpleJson poolDisks = pool.get("disks");
-			if (!poolDisks.isNull()) {
-				for (SimpleJson diskRef : poolDisks.asList()) {
-					String diskId = diskRef.asString();
-					if (diskId != null && !diskId.isEmpty()) {
-						rb.parent(poolKey, rb.resource("SynologyDisk",
-								diskNames.getOrDefault(diskId, diskId),
-								"disk_id", diskId));
-					}
-				}
-			}
-			SimpleJson cacheDiskIds = pool.get("cache_disks");
-			if (!cacheDiskIds.isNull()) {
-				for (SimpleJson diskRef : cacheDiskIds.asList()) {
-					String diskId = diskRef.asString();
-					if (diskId != null && !diskId.isEmpty()) {
-						rb.parent(poolKey, rb.resource("SynologyDisk",
-								diskNames.getOrDefault(diskId, diskId),
-								"disk_id", diskId));
-					}
-				}
-			}
-		}
-
-		// iSCSI LUN -> child of Volume (joined by location == vol_path)
-		for (SimpleJson lun : volumeChildrenKnown
-				? s.lunList.data().get("luns").asList()
-				: java.util.Collections.<SimpleJson>emptyList()) {
-			String uuid = lun.get("uuid").asString();
-			String location = lun.get("location").asString();
-			for (SimpleJson vol : storage.data().get("volumes").asList()) {
-				if (location.equals(vol.get("vol_path").asString())) {
-					String volId = vol.get("volume_id").asString(vol.get("vol_path").asString());
-					ResourceKey volKey = rb.resource("SynologyVolume",
-							volumeDisplayName(vol), "volume_id", volId);
-					rb.parent(volKey, rb.resource("SynologyIscsiLun",
-							lun.get("name").asString(uuid), "lun_uuid", uuid));
-					break;
-				}
-			}
-		}
-
-		// NFS Export -> child of Volume (joined by vol_path)
-		for (SimpleJson share : volumeChildrenKnown
-				? s.shares.data().get("shares").asList()
-				: java.util.Collections.<SimpleJson>emptyList()) {
-			String name = share.get("name").asString();
-			SimpleJson rules = s.nfsRulesByShare.get(name);
-			if (rules == null || rules.data().get("rule").size() == 0) continue;
-			String volPath = share.get("vol_path").asString();
-			for (SimpleJson vol : storage.data().get("volumes").asList()) {
-				if (volPath.equals(vol.get("vol_path").asString())) {
-					String volId = vol.get("volume_id").asString(vol.get("vol_path").asString());
-					ResourceKey volKey = rb.resource("SynologyVolume",
-							volumeDisplayName(vol), "volume_id", volId);
-					rb.parent(volKey, rb.resource("SynologyNfsExport", name,
-							"share_name", name));
-					break;
-				}
-			}
-		}
-
-		// SSD Cache -> child of Volume; cache NVMe disks -> child of SSD Cache
-		SimpleJson ssdCaches = storage.data().get("ssdCaches");
-		if (!ssdCaches.isNull()) {
-			for (SimpleJson cache : ssdCaches.asList()) {
-				String cacheId = cache.get("id").asString();
-				String mountSpaceId = cache.get("mountSpaceId").asString("");
-				if (cacheId == null || cacheId.isEmpty() || mountSpaceId.isEmpty()) continue;
-				ResourceKey cacheKey = rb.resource("SynologySsdCache",
-						cacheDisplayName(cache, storage), "cache_id", cacheId);
-
-				for (SimpleJson vol : volumeChildrenKnown
-						? storage.data().get("volumes").asList()
-						: java.util.Collections.<SimpleJson>emptyList()) {
-					if (mountSpaceId.equals(vol.get("id").asString(""))) {
-						String volId = vol.get("volume_id").asString(vol.get("vol_path").asString());
-						ResourceKey volKey = rb.resource("SynologyVolume",
-								volumeDisplayName(vol), "volume_id", volId);
-						rb.parent(volKey, cacheKey);
-						break;
-					}
-				}
-
-				SimpleJson cacheDisks = cache.get("disks");
-				if (!cacheDisks.isNull()) {
-					for (SimpleJson diskRef : cacheDisks.asList()) {
-						String diskId = diskRef.asString();
-						if (diskId != null && !diskId.isEmpty()) {
-							rb.parent(cacheKey, rb.resource("SynologyDisk",
-									diskNames.getOrDefault(diskId, diskId),
-									"disk_id", diskId));
-						}
-					}
-				}
-			}
-		}
-
-		// UPS -> child of Diskstation
-		if (s.ups != null && s.ups.data().get("usb_ups_connect").asBoolean()) {
-			String upsModel = s.ups.data().get("model").asString("UPS");
-			rb.parent(diskstation, rb.resource("SynologyUps", upsModel,
-					"ups_model", upsModel));
-		}
+		// Build 31 (issue #19): the internal tree is joined by
+		// SynologyTopology (SDK-free, null-safe joins, one try block per
+		// pool, LUN, export and SSD cache), so one object with a missing
+		// field costs its own edges instead of every relationship of the
+		// cycle. Same edges, order, names and identifiers as build 30.
+		SynologyTopology.Input<SimpleJson> in = new SynologyTopology.Input<>();
+		in.dsmInfo = s.dsmInfo;
+		in.storage = s.storage;
+		in.lunList = s.lunList;
+		in.shares = s.shares;
+		in.ups = s.ups;
+		in.nfsExports = s.nfsRulesByShare.keySet();
+		in.volumeChildrenKnown = volumeChildrenKnown;
+		SynologyTopology.build(SJ, in,
+				(parent, child) -> rb.parent(key(rb, parent), key(rb, child)),
+				this::logWarn, this::logInfo);
 
 		// --- Optional Datastore cross-link (build 16, v1 parity) ---
 		// Resolve real VMWARE Datastores by DataStrorePath and make each LUN /
@@ -1281,23 +1160,59 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	// Display name helpers
 	// -----------------------------------------------------------------------
 
+	// Build 31 (issue #19): one definition of each display name, shared with
+	// SynologyTopology so enumeration and relationships cannot drift.
+
 	private static String poolDisplayName(SimpleJson pool) {
-		return "Storage Pool " + pool.get("num_id").asLong();
+		return SynologyTopology.poolName(SJ, pool);
 	}
 
 	private static String volumeDisplayName(SimpleJson vol) {
-		return "Volume " + vol.get("num_id").asLong();
+		return SynologyTopology.volumeName(SJ, vol);
 	}
 
 	private static String cacheDisplayName(SimpleJson cache, SimpleJson storage) {
-		String mountSpaceId = cache.get("mountSpaceId").asString("");
-		for (SimpleJson vol : storage.data().get("volumes").asList()) {
-			if (mountSpaceId.equals(vol.get("id").asString(""))) {
-				return "SSD Cache (Volume " + vol.get("num_id").asLong() + ")";
-			}
-		}
-		return "SSD Cache";
+		return SynologyTopology.cacheName(SJ, cache, storage);
 	}
+
+	/** Build 31 (issue #19): the relationship key of a topology object. */
+	private static ResourceKey key(RelationshipBuilder rb, SynologyTopology.Obj o) {
+		return rb.resource(o.kind, o.name, o.idKey, o.id);
+	}
+
+	/** Build 31 (issue #19): {@link SynologyTopology}'s view of {@link SimpleJson}. */
+	private static final SynologyTopology.Json<SimpleJson> SJ =
+			new SynologyTopology.Json<SimpleJson>() {
+				@Override
+				public SimpleJson get(SimpleJson node, String key) {
+					return node.get(key);
+				}
+
+				@Override
+				public String str(SimpleJson node) {
+					return node.asString();
+				}
+
+				@Override
+				public long num(SimpleJson node) {
+					return node.asLong();
+				}
+
+				@Override
+				public boolean bool(SimpleJson node) {
+					return node.asBoolean();
+				}
+
+				@Override
+				public List<SimpleJson> list(SimpleJson node) {
+					return node.asList();
+				}
+
+				@Override
+				public boolean isNull(SimpleJson node) {
+					return node.isNull();
+				}
+			};
 
 	// -----------------------------------------------------------------------
 	// onDiscard
@@ -1534,22 +1449,24 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 		SimpleJson findPool(String poolId) {
 			for (SimpleJson p : storage.data().get("storagePools").asList()) {
-				if (p.get("id").asString().equals(poolId)) return p;
+				// Build 31 (issue #19): constant first, a pool without id never matches.
+				if (poolId != null && poolId.equals(p.get("id").asString())) return p;
 			}
 			return null;
 		}
 
 		SimpleJson findVolume(String volId) {
 			for (SimpleJson v : storage.data().get("volumes").asList()) {
-				String id = v.get("volume_id").asString(v.get("vol_path").asString());
-				if (id.equals(volId)) return v;
+				// Build 31 (issue #19): a volume with neither volume_id nor
+				// vol_path has no identity and never matches.
+				if (volId != null && volId.equals(SynologyTopology.volumeId(SJ, v))) return v;
 			}
 			return null;
 		}
 
 		SimpleJson findDisk(String diskId) {
 			for (SimpleJson d : storage.data().get("disks").asList()) {
-				if (d.get("id").asString().equals(diskId)) return d;
+				if (diskId != null && diskId.equals(d.get("id").asString())) return d;
 			}
 			return null;
 		}
@@ -1558,21 +1475,21 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			SimpleJson caches = storage.data().get("ssdCaches");
 			if (caches.isNull()) return null;
 			for (SimpleJson c : caches.asList()) {
-				if (c.get("id").asString().equals(cacheId)) return c;
+				if (cacheId != null && cacheId.equals(c.get("id").asString())) return c;
 			}
 			return null;
 		}
 
 		SimpleJson findLun(String uuid) {
 			for (SimpleJson l : lunList.data().get("luns").asList()) {
-				if (l.get("uuid").asString().equals(uuid)) return l;
+				if (uuid != null && uuid.equals(l.get("uuid").asString())) return l;
 			}
 			return null;
 		}
 
 		SimpleJson findShare(String name) {
 			for (SimpleJson sh : shares.data().get("shares").asList()) {
-				if (sh.get("name").asString().equals(name)) return sh;
+				if (name != null && name.equals(sh.get("name").asString())) return sh;
 			}
 			return null;
 		}

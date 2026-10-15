@@ -138,6 +138,14 @@ normally — collection is never failed over the optional cross-link.
   client, best effort, using the same teardown as removing the instance.
   Before build 31 every edit left a DSM session open until DSM expired it.
 
+- **One oddly shaped object no longer wipes the topology (build 31).** A
+  storage pool without `pool_path`, an iSCSI LUN without `location` (a
+  file-based or thin LUN on some DSM versions) or a volume without an
+  identifier is left out of the one edge that needs that field, with one
+  INFO line per cycle naming it. Every other relationship, including the
+  Datastore cross-link, is still published. Before build 31 such an object
+  threw, and no relationships at all were published, every cycle.
+
 ## Known Limitations
 
 - **No remediation / control actions.** The pack is read-only monitoring.

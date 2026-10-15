@@ -26,7 +26,7 @@ public final class FailureMappingTest {
 		unreachableIsDown();
 		wrappedUnreachableIsDown();
 		everythingElseIsError();
-		connectFailureStopsTheBuild();
+		unreachableOrRefusedEndsTheBuild();
 		System.out.println("FailureMappingTest: all assertions passed");
 	}
 
@@ -125,18 +125,30 @@ public final class FailureMappingTest {
 		T.check(!SynologyFailures.isUnreachable(outer), "a cause cycle terminates");
 	}
 
-	/** Only a connect-class failure ends the per-share NFS probe loop. */
-	static void connectFailureStopsTheBuild() {
-		T.check(SynologyFailures.isConnectFailure(asClientThrows(
-				new ConnectException("refused"))), "refused stops the probes");
-		T.check(SynologyFailures.isConnectFailure(asClientThrows(
+	/**
+	 * What ends the build from an optional read, the UPS read or an NFS
+	 * probe: an unreachable NAS (connect failure, and since review NIT-4 a
+	 * timeout too) or a login refusal. Anything else skips that one read.
+	 */
+	static void unreachableOrRefusedEndsTheBuild() {
+		T.check(SynologyFailures.endsBuild(asClientThrows(
+				new ConnectException("refused"))), "refused stops the build");
+		T.check(SynologyFailures.endsBuild(asClientThrows(
 				new HttpConnectTimeoutException("connect timed out"))),
-				"connect timeout stops the probes");
-		T.check(!SynologyFailures.isConnectFailure(asClientThrows(
+				"connect timeout stops the build");
+		T.check(SynologyFailures.endsBuild(asClientThrows(
 				new HttpTimeoutException("request timed out"))),
-				"a slow share does not stop the probes");
-		T.check(!SynologyFailures.isConnectFailure(new SynologyDsmException(
+				"a read timeout stops the build (NIT-4)");
+		T.check(SynologyFailures.endsBuild(new SynologyDsmException(
+				"Synology login failed: error code 400", 400, true)),
+				"a login refusal stops the build");
+		T.check(!SynologyFailures.endsBuild(new SynologyDsmException(
 				"SYNO.Core.FileServ.NFS.SharePrivilege load failed", 105, false)),
-				"a DSM permission error does not stop the probes");
+				"a DSM permission error does not stop the build");
+		T.check(!SynologyFailures.endsBuild(asClientThrows(
+				new SSLHandshakeException("PKIX path building failed"))),
+				"a certificate failure on one read does not stop the build");
+		T.check(!SynologyFailures.endsBuild(new IOException("HTTP 502")),
+				"an HTTP error does not stop the build");
 	}
 }

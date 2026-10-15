@@ -202,15 +202,22 @@ public final class SnapshotReadsTest {
 			T.eq(SnapshotReads.LUNS, nas.calls.get(nas.calls.size() - 1),
 					"no call after the connect failure");
 		}
-		// A read timeout on one optional endpoint is that endpoint's problem.
+		// Review NIT-4: a read timeout on an optional endpoint ends the
+		// build too (each further call would wait out the same ~93 s).
 		nas = new FakeNas();
-		nas.failing.put(SnapshotReads.SHARES, new SynologyTransportException(
-				"transport error calling SYNO.Core.Share list: timed out",
-				SynologyFailures.classifyTransport(
+		nas.failing.put(SnapshotReads.FAN, new SynologyTransportException(
+				"transport error calling SYNO.Core.Hardware.FanSpeed get: "
+				+ "timed out", SynologyFailures.classifyTransport(
 						new HttpTimeoutException("request timed out"))));
-		SnapshotReads.Result<String> r = read(new SnapshotReads(), nas,
-				new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
-		T.check(!r.isRead(SnapshotReads.SHARES), "a slow optional endpoint is skipped");
+		try {
+			read(new SnapshotReads(), nas, new ArrayList<>(), new ArrayList<>(),
+					new ArrayList<>());
+			throw new AssertionError("a timeout must end the build");
+		} catch (SynologyTransportException expected) {
+			T.eq(SnapshotReads.FAN, nas.calls.get(nas.calls.size() - 1),
+					"no call after the timeout");
+			T.check(SynologyFailures.isUnreachable(expected), "and it is DOWN");
+		}
 		// An interrupt is never swallowed.
 		nas = new FakeNas();
 		nas.failing.put(SnapshotReads.TARGETS, new InterruptedException("stop"));

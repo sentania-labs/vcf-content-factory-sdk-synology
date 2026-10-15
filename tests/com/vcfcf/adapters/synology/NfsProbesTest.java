@@ -96,5 +96,17 @@ public final class NfsProbesTest {
 			T.eq(400, SynologyFailures.authCode(e), "the refusal is kept");
 			T.eq(Arrays.asList("a"), refused.calls, "no further login");
 		}
+		// Review NIT-4: a probe that times out ends the build too.
+		FakeNas hung = new FakeNas();
+		hung.failing.put("a", new SynologyTransportException("transport error "
+				+ "calling SYNO.Core.FileServ.NFS.SharePrivilege load: timed out",
+				SynologyFailures.Transport.TIMEOUT));
+		try {
+			run(hung, Arrays.asList("a", "b", "c"), new ArrayList<>());
+			throw new AssertionError("a probe timeout must end the build");
+		} catch (IOException e) {
+			T.check(SynologyFailures.isUnreachable(e), "and is DOWN");
+			T.eq(Arrays.asList("a"), hung.calls, "no further share waits it out");
+		}
 	}
 }

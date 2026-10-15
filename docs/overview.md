@@ -121,7 +121,10 @@ normally — collection is never failed over the optional cross-link.
   result, so the cycle stays inside the 5-minute interval (before build
   31 each of about 25 objects waited out its own timeouts, close to 40
   minutes per cycle). The objects are marked DOWN; a refused login, a
-  certificate failure or an unreadable answer is ERROR. Stop Collecting
+  certificate failure or an unreadable answer is ERROR. A NAS that
+  answers the required reads and then stops answering ends the build at
+  the first optional read or NFS share probe that times out, instead of
+  each remaining call waiting out its own timeouts. Stop Collecting
   ends a snapshot build between DSM calls. The HTTP connect and read
   timeouts are one 30 s value, because the framework HTTP client offers
   no separate connect timeout.

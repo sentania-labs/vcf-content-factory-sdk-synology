@@ -1364,11 +1364,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			} catch (InterruptedException ie) {
 				throw ie;
 			} catch (Exception e) {
-				// Build 31 (issues #12, #13): a refused re-login or a NAS that
-				// stopped accepting connections fails the build, as for every
-				// other optional endpoint (SnapshotReads).
-				if (SynologyFailures.authCode(e) != 0
-						|| SynologyFailures.isConnectFailure(e)) {
+				// Build 31 (issues #12, #13, review NIT-4): a refused re-login,
+				// or a NAS that stopped accepting connections or answering,
+				// fails the build, as for every other optional endpoint
+				// (SynologyFailures.endsBuild).
+				if (SynologyFailures.endsBuild(e)) {
 					throw e;
 				}
 				adapter.logInfo("Snapshot: UPS not available: " + e.getMessage());

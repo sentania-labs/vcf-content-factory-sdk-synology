@@ -96,20 +96,17 @@ final class SynologyFailures {
 	}
 
 	/**
-	 * Issue #13: the NAS did not accept a connection at all (refused,
-	 * connect timeout, unknown host, no route), found anywhere in the cause
-	 * chain. Any further call in the same snapshot build would wait out the
-	 * same timeouts, so the build stops instead of probing on.
+	 * Whether a failed optional read (an optional endpoint, the UPS read or
+	 * a per-share NFS rule probe) ends the snapshot build instead of being
+	 * skipped. True for a DSM login refusal (issue #14: carrying on would
+	 * send one more failed login per remaining call, which counts toward
+	 * DSM Auto Block) and for an unreachable NAS, connect failure or
+	 * timeout (issue #13 and review NIT-4: every further call would wait
+	 * out the same three 30 s attempts, about 93 s each, so a NAS that
+	 * answered the required reads and then hung could outlast the cycle).
 	 */
-	static boolean isConnectFailure(Throwable t) {
-		Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-		for (Throwable c = t; c != null && seen.add(c); c = c.getCause()) {
-			Transport k = (c instanceof SynologyTransportException)
-					? ((SynologyTransportException) c).kind()
-					: classifyOne(c);
-			if (k == Transport.CONNECT) return true;
-		}
-		return false;
+	static boolean endsBuild(Throwable t) {
+		return authCode(t) != 0 || isUnreachable(t);
 	}
 
 	/** Issue #13: how a transport failure (no DSM answer) is classed. */

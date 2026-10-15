@@ -18,8 +18,9 @@ import java.util.function.Consumer;
  * failed is neither: it is recorded in {@link Result#failed}, so an existing
  * export on it is ERROR and Volume edges are left unchanged for the cycle,
  * instead of the export publishing {@code rule_count = 0}. A probe that
- * cannot connect, or whose session re-login is refused, ends the build
- * (issues #13, #14), as for the optional reads.
+ * cannot connect or times out, or whose session re-login is refused, ends
+ * the build ({@link SynologyFailures#endsBuild}), as for the optional
+ * reads.
  */
 final class NfsProbes {
 
@@ -49,8 +50,9 @@ final class NfsProbes {
 	 * @param shares the share names, in share-list order
 	 * @param cp     the abort check run before each probe
 	 * @param warn   receives one line per share whose probe failed
-	 * @throws Exception an interrupt or abort, a connect failure (wrapped,
-	 *         redacted text only) or a DSM login refusal
+	 * @throws Exception an interrupt or abort, an unreachable NAS (connect
+	 *         failure or timeout; wrapped, redacted text only) or a DSM
+	 *         login refusal
 	 */
 	static <J> Result<J> run(List<String> shares, Probe<J> probe,
 			RuleCount<J> count, SnapshotReads.Checkpoint cp,
@@ -66,19 +68,19 @@ final class NfsProbes {
 			} catch (InterruptedException ie) {
 				throw ie;
 			} catch (Exception e) {
-				// Build 31 (issue #13): the NAS stopped accepting
-				// connections. Every further probe would wait out the same
-				// timeouts, so the build fails here instead of probing each
-				// remaining share in turn.
-				if (SynologyFailures.isConnectFailure(e)) {
-					throw new IOException("NFS rule probe for share " + name
-							+ " could not connect to the NAS: "
-							+ e.getMessage(), e);
-				}
-				// Build 31 (issue #14): a refused re-login fails the build
-				// too; probing on would send one failed login per share.
+				// Build 31 (issue #14): a refused re-login fails the build;
+				// probing on would send one failed login per share.
 				if (SynologyFailures.authCode(e) != 0) {
 					throw e;
+				}
+				// Build 31 (issue #13, review NIT-4): the NAS stopped
+				// accepting connections or stopped answering. Every further
+				// probe would wait out the same timeouts, so the build fails
+				// here instead of probing each remaining share in turn.
+				if (SynologyFailures.endsBuild(e)) {
+					throw new IOException("NFS rule probe for share " + name
+							+ " found the NAS unreachable: " + e.getMessage(),
+							e);
 				}
 				r.failed.put(name, SynologyFailures.describe(e));
 				warn.accept("Snapshot: NFS rule probe failed for share "

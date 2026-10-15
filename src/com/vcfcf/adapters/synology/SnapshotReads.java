@@ -40,8 +40,10 @@ import java.util.function.Consumer;
  * <p>Three failures of an optional read still fail the build: an
  * interrupt, a DSM login refusal (the session expired and the re-login was
  * refused; carrying on would send one more failed login per remaining
- * call, which counts toward DSM Auto Block) and a connect failure (the NAS
- * is gone; carrying on would wait out the same timeouts per call).
+ * call, which counts toward DSM Auto Block) and an unreachable NAS, a
+ * connect failure or (review NIT-4) a timeout (carrying on would wait out
+ * the same three 30 s attempts per call). See
+ * {@link SynologyFailures#endsBuild}.
  *
  * <p>The call order is unchanged from build 30.
  *
@@ -133,7 +135,7 @@ final class SnapshotReads {
 	 * @param warn  receives the one WARN per newly unreadable endpoint
 	 * @param info  receives the one INFO per endpoint readable again
 	 * @throws Exception a required endpoint's failure, or an interrupt, a
-	 *         login refusal or a connect failure on any endpoint
+	 *         login refusal, a connect failure or a timeout on any endpoint
 	 */
 	<J> Result<J> read(Source<J> src, J empty, Checkpoint cp,
 			Consumer<String> warn, Consumer<String> info) throws Exception {
@@ -177,8 +179,7 @@ final class SnapshotReads {
 		} catch (InterruptedException ie) {
 			throw ie;
 		} catch (Exception e) {
-			if (SynologyFailures.authCode(e) != 0
-					|| SynologyFailures.isConnectFailure(e)) {
+			if (SynologyFailures.endsBuild(e)) {
 				throw e;
 			}
 			if (EMPTY_WHEN_NOT_INSTALLED.contains(endpoint)

@@ -4,7 +4,7 @@ import java.util.function.Consumer;
 
 /**
  * Build 31 (issue #21): runs the release steps of one configuration (DSM
- * logout, Suite API stitcher discard, HTTP client discard) best effort, in
+ * client close and logout, Suite API stitcher discard) best effort, in
  * the given order: every step runs even when an earlier one throws, and a
  * failure is one WARN naming the step, never an exception out of configure
  * or discard. No VCF Ops SDK and no framework-jar dependency, so the

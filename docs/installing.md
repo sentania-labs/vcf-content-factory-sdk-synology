@@ -37,7 +37,9 @@ Every other endpoint is optional. When one is refused or unavailable (a
 model without fans, Virtual DSM, a service that is not installed, a
 missing privilege), the adapter logs one WARN naming the endpoint, keeps
 collecting everything else, and skips only what depends on it, never
-publishing a placeholder value:
+publishing a placeholder value. Existing objects that depend on it (iSCSI
+LUN or NFS export objects) are reported ERROR each cycle while it is
+unread, and the framework logs its own line for each of them:
 
 | Optional endpoint | Skipped while it is not readable |
 |---|---|

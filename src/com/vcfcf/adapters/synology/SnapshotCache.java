@@ -21,10 +21,12 @@ import java.util.function.Consumer;
  * ({@link SynologyFailures#authCode}) the back-off is {@code authBackoffMs},
  * doubled for each further consecutive refusal up to {@code maxAuthBackoffMs};
  * after any other failure it is {@code retryBackoffMs}. A successful build
- * resets the doubling. The first resource gets the original exception; the
- * others get a {@link CachedFailureException} whose cause is that exception,
- * so status mapping sees the same chain. One WARN per failed build, through
- * the supplied sink.
+ * resets the doubling. The first caller (usually the collect-path discovery
+ * step) gets the original exception; the others get a
+ * {@link CachedFailureException} whose cause is that exception, so status
+ * mapping sees the same chain. One WARN per failed build, through the
+ * supplied sink; the framework still logs its own line for each resource
+ * that fails.
  *
  * <p><b>One build per cycle (issue #13).</b> A snapshot serves the cycle it
  * was built in and is rebuilt in the next one; {@code maxAgeMs} is only a

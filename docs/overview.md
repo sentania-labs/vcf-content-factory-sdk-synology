@@ -98,9 +98,12 @@ normally — collection is never failed over the optional cross-link.
   snapshot it collects from (no redundant, rate-limit-hostile API pulls).
 - **A failed login is not retried per resource (build 31).** When the
   per-cycle snapshot cannot be built (wrong or rotated password, disabled
-  account, NAS down), the failure is cached: the first resource reports
-  it, every other resource of that cycle fails from the cached result
-  without contacting the NAS, and the adapter log gets one WARN. After a
+  account, NAS down), the failure is cached: the first caller of the
+  cycle (usually the discovery step) reports it, and every other resource
+  of that cycle fails from the cached result without contacting the NAS.
+  The adapter log gets one `Synology snapshot build failed` WARN per
+  attempted login, plus the framework's own line for the discovery step
+  and for each resource that fails from the cached result. After a
   DSM login refusal (error 400, 401, 402, 403, 404, 406, 407, 408, 409 or
   410, which DSM returns in the body of an HTTP 200) no login is tried for
   15 minutes, then 30, then every 60 minutes while the refusals continue,
@@ -127,7 +130,9 @@ normally — collection is never failed over the optional cross-link.
   Only DSM info, system info, utilization and storage load_info are
   required. Any other endpoint that fails (FanSpeed on Virtual DSM, NFS or
   iSCSI not installed, CurrentConnection without the privilege) is logged
-  once at WARN and only what depends on it is skipped; the DiskStation,
+  once at WARN by the adapter and only what depends on it is skipped
+  (existing LUN or NFS export objects that depend on it are ERROR each
+  cycle, with the framework's own log line for each); the DiskStation,
   pools, volumes, disks and SSD caches are still discovered and
   collected. See docs/installing.md for the endpoint table and the minimum
   DSM privileges.

@@ -599,9 +599,13 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 * marks the resource ERROR/DOWN, never a silent empty snapshot.
 	 *
 	 * <p>Build 31 (issue #12): a failed refresh is cached by the
-	 * configuration's {@link SnapshotCache}: the remaining resources of the
-	 * cycle fail from it without contacting the NAS (one WARN, no new
-	 * login), and so does every call until its back-off has passed.
+	 * configuration's {@link SnapshotCache}: the first caller of the cycle
+	 * (usually the collect-path discovery step) gets the original failure,
+	 * and the remaining resources fail from it without contacting the NAS
+	 * (no new login), as does every call until its back-off has passed. The
+	 * cache logs one "Synology snapshot build failed" WARN per attempted
+	 * build; the framework still logs its own line for each resource that
+	 * fails.
 	 */
 	private Snapshot currentSnapshot() throws Exception {
 		Configured c = this.configured;

@@ -175,6 +175,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	@Override
 	protected void configureAdapter(ResourceStatus status,
 			ResourceConfig resourceConfig) {
+		// Build 31 (issue #21): the configuration this one replaces. Released
+		// (DSM logout, stitcher and HTTP client discarded) once the new one is
+		// published, by the same teardown onDiscard uses. Before build 31 an
+		// edit left the old DSM session open until DSM expired it, and the old
+		// HTTP client and Suite API session unreleased.
+		final Configured oldConfigured = this.configured;
+		final SuiteApiStitcher oldSuiteStitcher = this.suiteStitcher;
+		final ManagedHttpClient oldHttpClient = this.httpClient;
+
 		SynologyConfig cfg = buildConfig(resourceConfig);
 		this.config = cfg;
 		this.httpClient = buildHttpClient(cfg);
@@ -255,6 +264,32 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		if (insecure != null) {
 			logWarn(insecure);
 		}
+
+		// Build 31 (issue #21): release the replaced configuration. The new
+		// API client has not logged in yet (its first snapshot build does),
+		// so the old session's logout cannot end the new one.
+		releaseConfiguration("instance reconfigured", oldConfigured,
+				oldSuiteStitcher == this.suiteStitcher ? null : oldSuiteStitcher,
+				oldHttpClient == this.httpClient ? null : oldHttpClient);
+	}
+
+	/**
+	 * Build 31 (issue #21): the teardown shared by {@link #configureAdapter}
+	 * (for the configuration it replaces) and {@link #onDiscard}. Logs the
+	 * DSM session out first (it is sent over {@code http}), then discards
+	 * the Suite API stitcher and the HTTP client. Best effort: every step
+	 * runs, a failure is one WARN, nothing is thrown. Null arguments are
+	 * skipped. {@code ManagedHttpClient} has no close; {@code discard()} is
+	 * its release.
+	 */
+	private void releaseConfiguration(String why, Configured c,
+			SuiteApiStitcher st, ManagedHttpClient http) {
+		Teardown.run(why, this::logWarn,
+				Teardown.step("DSM logout", c == null ? null : c.api::logout),
+				Teardown.step("Suite API stitcher discard",
+						st == null ? null : st::discard),
+				Teardown.step("HTTP client discard",
+						http == null ? null : http::discard));
 	}
 
 	private SynologyConfig buildConfig(ResourceConfig rc) {
@@ -1271,12 +1306,13 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	@Override
 	public void onDiscard() {
 		Configured c = this.configured;
-		if (c != null) c.api.logout();
 		SuiteApiStitcher s = this.suiteStitcher;
-		if (s != null) s.discard();
 		this.suiteStitcher = null;
 		this.stitcher = null;
 		this.configured = null;
+		// Build 31 (issue #21): the same teardown as a reconfigure. The HTTP
+		// client is left to super.onDiscard(), which discards and clears it.
+		releaseConfiguration("instance discarded", c, s, null);
 		super.onDiscard();
 	}
 

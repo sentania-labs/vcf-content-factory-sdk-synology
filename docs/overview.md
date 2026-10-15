@@ -132,6 +132,12 @@ normally — collection is never failed over the optional cross-link.
   collected. See docs/installing.md for the endpoint table and the minimum
   DSM privileges.
 
+- **Editing the instance releases the old DSM session (build 31).** A
+  reconfigure (password change, TLS toggle, host change) logs the previous
+  DSM session out and discards the previous Suite API stitcher and HTTP
+  client, best effort, using the same teardown as removing the instance.
+  Before build 31 every edit left a DSM session open until DSM expired it.
+
 ## Known Limitations
 
 - **No remediation / control actions.** The pack is read-only monitoring.

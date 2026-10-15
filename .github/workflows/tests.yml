@@ -20,4 +20,4 @@ concurrency:
 
 jobs:
   tests:
-    uses: sentania-labs/vcf-content-factory-sdk-template/.github/workflows/pak-tests.yml@main
+    uses: sentania-labs/vcf-content-factory-sdk-template/.github/workflows/pak-tests.yml@ci/reusable-pak-tests

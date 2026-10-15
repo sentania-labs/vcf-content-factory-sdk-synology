@@ -269,8 +269,9 @@ public final class SnapshotReadsTest {
 		T.check(r.unread.isEmpty(), "the second 102 is not unread: " + r.unread);
 		T.eq(EMPTY, r.lunList, "the LUN list is the empty list");
 		T.eq(EMPTY, r.targets, "the target list is the empty list");
-		T.check(SnapshotIsolation.volumeChildrenKnown(r.unread,
-				java.util.Collections.emptyMap()),
+		T.check(SnapshotIsolation.volumeChildren(r.unread,
+				java.util.Collections.emptyMap(),
+				java.util.Collections.emptyMap()).allKnown(),
 				"so Volume children are known and Volumes are parents");
 		T.eq(0, warns.size(), "no WARN for a package that is not installed");
 		T.eq(2, infos.size(), "one INFO per endpoint: " + infos);
@@ -287,8 +288,9 @@ public final class SnapshotReadsTest {
 		SnapshotReads.Result<String> s = read(new SnapshotReads(), scoped,
 				new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
 		T.check(!s.isRead(SnapshotReads.LUNS), "105 on the LUN list is unread");
-		T.check(!SnapshotIsolation.volumeChildrenKnown(s.unread,
-				java.util.Collections.emptyMap()), "and Volumes are frozen");
+		T.check(!SnapshotIsolation.volumeChildren(s.unread,
+				java.util.Collections.emptyMap(),
+				java.util.Collections.emptyMap()).allKnown(), "and Volumes are frozen");
 
 		// 102 on an endpoint whose empty value would publish defaults stays
 		// unread (no Fan "unknown", no NFS "false").
@@ -344,8 +346,9 @@ public final class SnapshotReadsTest {
 		T.check(!r.isRead(SnapshotReads.LUNS), "a single 102 is unread");
 		T.check(r.unread.get(SnapshotReads.LUNS).contains("102"),
 				"the reason names the 102: " + r.unread);
-		T.check(!SnapshotIsolation.volumeChildrenKnown(r.unread,
-				java.util.Collections.emptyMap()),
+		T.check(!SnapshotIsolation.volumeChildren(r.unread,
+				java.util.Collections.emptyMap(),
+				java.util.Collections.emptyMap()).allKnown(),
 				"so Volume LUN edges are kept, not dropped");
 		try {
 			SnapshotIsolation.requireListRead(r.unread, "SynologyIscsiLun");

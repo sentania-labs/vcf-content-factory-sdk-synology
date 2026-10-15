@@ -3,6 +3,7 @@ package com.vcfcf.adapters.synology;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -17,6 +18,7 @@ public final class SnapshotIsolationTest {
 		unreadListMakesItsObjectsError();
 		volumeChildrenFrozenWhileAListIsUnread();
 		failedNfsProbeIsNotAnExportWithoutRules();
+		failedNfsProbeFreezesOnlyItsVolume();
 		reconfigureReleasesOnlyWhatWasReplaced();
 		System.out.println("SnapshotIsolationTest: all assertions passed");
 	}
@@ -70,17 +72,18 @@ public final class SnapshotIsolationTest {
 
 	static void volumeChildrenFrozenWhileAListIsUnread() {
 		Map<String, String> none = Collections.emptyMap();
-		T.check(SnapshotIsolation.volumeChildrenKnown(none, none),
+		T.check(SnapshotIsolation.volumeChildren(none, none, none).allKnown(),
 				"everything read: Volumes are parents");
-		T.check(!SnapshotIsolation.volumeChildrenKnown(
-				Collections.singletonMap(SnapshotReads.LUNS, "x"), none),
+		SnapshotIsolation.VolumeChildren luns = SnapshotIsolation.volumeChildren(
+				Collections.singletonMap(SnapshotReads.LUNS, "x"), none, none);
+		T.check(luns.noneKnown() && !luns.known("/volume1"),
 				"LUN list unread: no Volume is a parent");
-		T.check(!SnapshotIsolation.volumeChildrenKnown(
-				Collections.singletonMap(SnapshotReads.SHARES, "x"), none),
-				"share list unread: no Volume is a parent");
-		T.check(SnapshotIsolation.volumeChildrenKnown(
-				Collections.singletonMap(SnapshotReads.TARGETS, "x"), none),
-				"target list unread: Volume children are still known");
+		T.check(SnapshotIsolation.volumeChildren(
+				Collections.singletonMap(SnapshotReads.SHARES, "x"), none, none)
+				.noneKnown(), "share list unread: no Volume is a parent");
+		T.check(SnapshotIsolation.volumeChildren(
+				Collections.singletonMap(SnapshotReads.TARGETS, "x"), none, none)
+				.allKnown(), "target list unread: Volume children are still known");
 	}
 
 	/**
@@ -102,9 +105,55 @@ public final class SnapshotIsolationTest {
 		SnapshotIsolation.requireNfsProbe(failed, "backups");
 		SnapshotIsolation.requireNfsProbe(failed, null);
 		SnapshotIsolation.requireNfsProbe(none, "vmware");
-		T.check(!SnapshotIsolation.volumeChildrenKnown(none, failed),
-				"a failed probe counts like an unread share list: no Volume "
-				+ "is a parent, so the export keeps its Volume edge");
+		SnapshotIsolation.VolumeChildren vc = SnapshotIsolation.volumeChildren(
+				none, failed, Collections.singletonMap("vmware", "/volume1"));
+		T.check(!vc.known("/volume1"), "a failed probe freezes its Volume, "
+				+ "so the export keeps its Volume edge");
+	}
+
+	/**
+	 * Review NIT-R3: one share whose probe is always refused froze every
+	 * Volume's relationships. Now only the Volume it sits on.
+	 */
+	static void failedNfsProbeFreezesOnlyItsVolume() {
+		Map<String, String> none = Collections.emptyMap();
+		Map<String, String> volPathByShare = new LinkedHashMap<>();
+		volPathByShare.put("vmware", "/volume1");
+		volPathByShare.put("backups", "/volume2");
+		volPathByShare.put("media", "/volume1");
+		volPathByShare.put("orphan", null);
+		Map<String, String> failed = Collections.singletonMap("vmware", "code 105");
+		SnapshotIsolation.VolumeChildren vc =
+				SnapshotIsolation.volumeChildren(none, failed, volPathByShare);
+		T.check(!vc.known("/volume1"), "the failed share's Volume is frozen");
+		T.check(vc.known("/volume2"), "another Volume refreshes");
+		T.check(vc.known("/volume3"), "a Volume with no shares refreshes");
+		T.check(vc.known(null), "a Volume without vol_path refreshes");
+		T.check(!vc.allKnown() && !vc.noneKnown(), "some, not all, frozen");
+		T.eq(Collections.singleton("/volume1"), vc.frozenVolumes(),
+				"the frozen Volume is named for the log line");
+
+		Map<String, String> two = new LinkedHashMap<>(failed);
+		two.put("backups", "code 105");
+		SnapshotIsolation.VolumeChildren both =
+				SnapshotIsolation.volumeChildren(none, two, volPathByShare);
+		T.check(!both.known("/volume1") && !both.known("/volume2")
+				&& both.known("/volume3"), "two failed shares freeze their two Volumes");
+
+		// A failed share whose vol_path is unknown could sit on any Volume.
+		for (String share : new String[] {"orphan", "not-in-share-list"}) {
+			T.check(SnapshotIsolation.volumeChildren(none,
+					Collections.singletonMap(share, "x"), volPathByShare)
+					.noneKnown(), share + ": vol_path unknown, every Volume frozen");
+		}
+		Map<String, String> blank = Collections.singletonMap("blank", "");
+		T.check(SnapshotIsolation.volumeChildren(none,
+				Collections.singletonMap("blank", "x"), blank).noneKnown(),
+				"a blank vol_path is unknown too");
+		// An unread list still freezes every Volume, whatever the probes say.
+		T.check(SnapshotIsolation.volumeChildren(
+				Collections.singletonMap(SnapshotReads.SHARES, "x"), failed,
+				volPathByShare).noneKnown(), "unread share list: none known");
 	}
 
 	static void reconfigureReleasesOnlyWhatWasReplaced() {

@@ -50,17 +50,20 @@ unread, and the framework logs its own line for each of them:
 | `SYNO.Core.Network.Interface` | DiskStation NIC count, the NFS export Datastore cross-link |
 | `SYNO.Core.CurrentConnection` | NFS client counts (DiskStation and NFS export) |
 | `SYNO.Core.Share` | NFS export objects (existing ones go ERROR), their Volume and Datastore relationships |
-| `SYNO.Core.FileServ.NFS.SharePrivilege` (per share) | that share's NFS rules: an existing NFS export on it goes ERROR (no `rule_count` or `allowed_clients` is published), Volume relationships are left unchanged, and a share not yet known as an export is not discovered until its probe succeeds |
+| `SYNO.Core.FileServ.NFS.SharePrivilege` (per share) | that share's NFS rules: an existing NFS export on it goes ERROR (no `rule_count` or `allowed_clients` is published), the relationships of the Volume that share sits on are left unchanged (other Volumes still refresh), and a share not yet known as an export is not discovered until its probe succeeds |
 | `SYNO.Core.ExternalDevice.UPS` | the UPS object |
 
 The UPS read and the per-share NFS rule probe keep their build 30
 logging: an INFO each cycle for UPS, a WARN each cycle per share whose
 probe fails.
 
-While the iSCSI LUN list or the share list cannot be read, or the NFS
-rule probe of any share fails, no Volume relationships are refreshed (a
-Volume's LUN, NFS export and SSD cache edges stay as they were), so a
-temporary failure does not detach them.
+While the iSCSI LUN list or the share list cannot be read, no Volume
+relationships are refreshed (a Volume's LUN, NFS export and SSD cache
+edges stay as they were), so a temporary failure does not detach them.
+When the NFS rule probe of a share fails, only the Volume that share sits
+on (its `vol_path`) keeps its edges as they were; every other Volume
+refreshes. If the failed share's volume is not known, no Volume is
+refreshed.
 
 A NAS without iSCSI (SAN Manager not installed) answers the iSCSI LUN and
 target lists with DSM error 102 (the API does not exist). The adapter
@@ -77,7 +80,8 @@ created or edited.
 The case that stays frozen is a permanent refusal: an account without the
 privilege to read the LUN list or the share list (DSM error 105, for
 example), or a share whose NFS rule probe is always refused. Then Volume
-relationships are never refreshed: a new SSD cache or NFS export is not
+relationships are never refreshed (for a refused probe, only those of the
+Volume the share sits on): a new SSD cache, LUN or NFS export is not
 attached to its Volume, and a removed or moved SSD cache keeps its old
 Volume edge, until the account can read them. The `Optional DSM endpoint
 ... is not readable` WARN and the per-share probe WARN name the cause. Use

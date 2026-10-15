@@ -64,6 +64,7 @@ public final class TopologyTest {
 		fullFixtureEmitsBuild30Edges();
 		missingFieldsCostOnlyTheirOwnEdges();
 		unreadListsKeepVolumeEdges();
+		failedProbeFreezesOnlyItsVolume();
 		System.out.println("TopologyTest: all assertions passed");
 	}
 
@@ -208,7 +209,7 @@ public final class TopologyTest {
 	/** Issue #14 interplay: an unread LUN or share list keeps Volume edges. */
 	static void unreadListsKeepVolumeEdges() {
 		SynologyTopology.Input<Object> in = fullFixture();
-		in.volumeChildrenKnown = false;
+		in.volumeChildren = SnapshotIsolation.VolumeChildren.NONE;
 		List<String> edges = run(in, new ArrayList<>(), new ArrayList<>());
 		for (String e : edges) {
 			T.check(!e.startsWith("SynologyVolume:"), "no Volume is a parent: " + e);
@@ -217,5 +218,48 @@ public final class TopologyTest {
 				o("SynologySsdCache", "SSD Cache (Volume 1)", "cache_id", "alloc_cache_1_1"),
 				o("SynologyDisk", "Cache device 1", "disk_id", "nvme0n1"))),
 				"the SSD cache still parents its disks");
+	}
+
+	/**
+	 * Review NIT-R3: a share on Volume 1 whose NFS rule probe is always
+	 * refused keeps Volume 1's edges unchanged, and Volume 2 still
+	 * refreshes its LUN, NFS export and SSD cache edges.
+	 */
+	@SuppressWarnings("unchecked")
+	static void failedProbeFreezesOnlyItsVolume() {
+		SynologyTopology.Input<Object> in = fullFixture();
+		Map<String, Object> st = (Map<String, Object>) ((Map<String, Object>) in.storage).get("data");
+		((List<Object>) st.get("volumes")).add(obj("id", "volume_2", "num_id", 2,
+				"vol_path", "/volume2", "pool_path", "reuse_1"));
+		((List<Object>) st.get("ssdCaches")).add(obj("id", "alloc_cache_1_2",
+				"mountSpaceId", "volume_2", "disks", list()));
+		((List<Object>) ((Map<String, Object>) ((Map<String, Object>) in.lunList)
+				.get("data")).get("luns")).add(obj("uuid", "e5f6", "name",
+						"esx-lun-2", "location", "/volume2"));
+		((List<Object>) ((Map<String, Object>) ((Map<String, Object>) in.shares)
+				.get("data")).get("shares")).add(obj("name", "esx-nfs-2",
+						"vol_path", "/volume2"));
+		in.nfsExports = new HashSet<>(Arrays.asList("esx-nfs", "esx-nfs-2"));
+		Map<String, String> volPathByShare = new LinkedHashMap<>();
+		volPathByShare.put("esx-nfs", "/volume1");
+		volPathByShare.put("smb-only", "/volume1");
+		volPathByShare.put("esx-nfs-2", "/volume2");
+		in.volumeChildren = SnapshotIsolation.volumeChildren(
+				Collections.emptyMap(),
+				Collections.singletonMap("smb-only", "code 105"), volPathByShare);
+
+		List<String> edges = run(in, new ArrayList<>(), new ArrayList<>());
+		for (String e : edges) {
+			T.check(!e.startsWith("SynologyVolume:/volume1("),
+					"Volume 1 is not a parent, its edges are kept: " + e);
+		}
+		SynologyTopology.Obj vol2 = o("SynologyVolume", "Volume 2", "volume_id", "/volume2");
+		for (String e : Arrays.asList(
+				edge(vol2, o("SynologyIscsiLun", "esx-lun-2", "lun_uuid", "e5f6")),
+				edge(vol2, o("SynologyNfsExport", "esx-nfs-2", "share_name", "esx-nfs-2")),
+				edge(vol2, o("SynologySsdCache", "SSD Cache (Volume 2)", "cache_id",
+						"alloc_cache_1_2")))) {
+			T.check(edges.contains(e), "Volume 2 refreshes: " + e + " in " + edges);
+		}
 	}
 }

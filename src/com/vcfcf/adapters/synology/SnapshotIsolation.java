@@ -1,7 +1,10 @@
 package com.vcfcf.adapters.synology;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Build 31 (issue #14, review W2): the adapter-side decisions that keep an
@@ -66,20 +69,80 @@ final class SnapshotIsolation {
 	}
 
 	/**
-	 * Whether every Volume's children (LUNs from the LUN list, NFS exports
-	 * from the share list and the per-share NFS rule probes, SSD caches from
+	 * Which Volumes' children (LUNs from the LUN list, NFS exports from the
+	 * share list and the per-share NFS rule probes, SSD caches from
 	 * storage) are known this cycle. Own-adapter parents are full-set (the
-	 * platform replaces a parent's children with what is emitted), so when
-	 * they are not, no Volume is emitted as a parent and its existing edges
-	 * are kept. Review B2: a share whose NFS rule probe failed may be an
-	 * export, so it counts like an unread share list; emitting its Volume
-	 * without it would drop that export's Volume edge for the cycle.
+	 * platform replaces a parent's children with what is emitted), so a
+	 * Volume whose children are not known is not emitted as a parent and
+	 * its existing edges are kept.
 	 */
-	static boolean volumeChildrenKnown(Map<String, String> unread,
-			Map<String, String> probeFailed) {
-		return !unread.containsKey(SnapshotReads.LUNS)
-				&& !unread.containsKey(SnapshotReads.SHARES)
-				&& probeFailed.isEmpty();
+	static final class VolumeChildren {
+		/** Every Volume's children are known. */
+		static final VolumeChildren ALL =
+				new VolumeChildren(false, Collections.emptySet());
+		/** No Volume's children are known. */
+		static final VolumeChildren NONE =
+				new VolumeChildren(true, Collections.emptySet());
+
+		/** True when no Volume's children are known (a list was unread). */
+		private final boolean none;
+		/** The {@code vol_path} of each Volume whose children are not known. */
+		private final Set<String> frozen;
+
+		private VolumeChildren(boolean none, Set<String> frozen) {
+			this.none = none;
+			this.frozen = Collections.unmodifiableSet(frozen);
+		}
+
+		/** Whether the children of the Volume at {@code volPath} are known. */
+		boolean known(String volPath) {
+			return !none && !(volPath != null && frozen.contains(volPath));
+		}
+
+		/** Whether every Volume's children are known. */
+		boolean allKnown() {
+			return !none && frozen.isEmpty();
+		}
+
+		/** Whether no Volume's children are known. */
+		boolean noneKnown() {
+			return none;
+		}
+
+		/** The {@code vol_path}s frozen this cycle (empty when none or all). */
+		Set<String> frozenVolumes() {
+			return frozen;
+		}
+	}
+
+	/**
+	 * Decides {@link VolumeChildren} for this cycle. An unread LUN or share
+	 * list leaves no Volume's children known. Review B2: a share whose NFS
+	 * rule probe failed may be an export, so its Volume is not emitted
+	 * without it (that would drop the export's Volume edge for the cycle).
+	 * Review NIT-R3: only that Volume, the one at the share's
+	 * {@code vol_path}; every other Volume refreshes. A failed share whose
+	 * {@code vol_path} is unknown could sit on any Volume, so then none is
+	 * known.
+	 *
+	 * @param volPathByShare each share's {@code vol_path} from the share list
+	 */
+	static VolumeChildren volumeChildren(Map<String, String> unread,
+			Map<String, String> probeFailed, Map<String, String> volPathByShare) {
+		if (unread.containsKey(SnapshotReads.LUNS)
+				|| unread.containsKey(SnapshotReads.SHARES)) {
+			return VolumeChildren.NONE;
+		}
+		Set<String> frozen = new TreeSet<>();
+		for (String share : probeFailed.keySet()) {
+			String volPath = volPathByShare.get(share);
+			if (volPath == null || volPath.isEmpty()) {
+				return VolumeChildren.NONE;
+			}
+			frozen.add(volPath);
+		}
+		return frozen.isEmpty() ? VolumeChildren.ALL
+				: new VolumeChildren(false, frozen);
 	}
 
 	/**

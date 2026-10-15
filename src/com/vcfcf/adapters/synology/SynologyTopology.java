@@ -102,10 +102,13 @@ final class SynologyTopology {
 		/** Share names that are NFS exports (more than zero NFS rules). */
 		Set<String> nfsExports = Collections.emptySet();
 		/**
-		 * False when the LUN or share list was not read this cycle: then no
-		 * Volume is a parent (issue #14), so its existing edges are kept.
+		 * Which Volumes are parents this cycle (issue #14): none when the LUN
+		 * or share list was not read, and (review NIT-R3) not the Volume a
+		 * share whose NFS rule probe failed sits on. A Volume that is not a
+		 * parent keeps its existing edges.
 		 */
-		boolean volumeChildrenKnown = true;
+		SnapshotIsolation.VolumeChildren volumeChildren =
+				SnapshotIsolation.VolumeChildren.ALL;
 	}
 
 	/** Null-safe join: true only when {@code a} is present and equal to {@code b}. */
@@ -207,7 +210,7 @@ final class SynologyTopology {
 		}
 
 		// iSCSI LUN -> child of Volume (joined by location == vol_path)
-		if (in.volumeChildrenKnown) {
+		if (!in.volumeChildren.noneKnown()) {
 			for (J lun : js.list(js.get(data(js, in.lunList), "luns"))) {
 				try {
 					String uuid = js.str(js.get(lun, "uuid"));
@@ -222,7 +225,7 @@ final class SynologyTopology {
 					for (J vol : volumes) {
 						if (same(location, js.str(js.get(vol, "vol_path")))) {
 							String volId = volumeId(js, vol);
-							if (volId == null) break;
+							if (volId == null || !in.volumeChildren.known(location)) break;
 							out.parent(new Obj("SynologyVolume",
 									volumeName(js, vol), "volume_id", volId),
 									new Obj("SynologyIscsiLun",
@@ -251,7 +254,7 @@ final class SynologyTopology {
 					for (J vol : volumes) {
 						if (same(volPath, js.str(js.get(vol, "vol_path")))) {
 							String volId = volumeId(js, vol);
-							if (volId == null) break;
+							if (volId == null || !in.volumeChildren.known(volPath)) break;
 							out.parent(new Obj("SynologyVolume",
 									volumeName(js, vol), "volume_id", volId),
 									new Obj("SynologyNfsExport", name,
@@ -278,11 +281,12 @@ final class SynologyTopology {
 					}
 					Obj cacheKey = new Obj("SynologySsdCache",
 							cacheName(js, cache, in.storage), "cache_id", cacheId);
-					if (in.volumeChildrenKnown) {
+					if (!in.volumeChildren.noneKnown()) {
 						for (J vol : volumes) {
 							if (mountSpaceId.equals(orEmpty(js.str(js.get(vol, "id"))))) {
 								String volId = volumeId(js, vol);
-								if (volId == null) break;
+								if (volId == null || !in.volumeChildren.known(
+										js.str(js.get(vol, "vol_path")))) break;
 								out.parent(new Obj("SynologyVolume",
 										volumeName(js, vol), "volume_id", volId),
 										cacheKey);

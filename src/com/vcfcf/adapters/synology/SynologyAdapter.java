@@ -1093,15 +1093,28 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		// when the LUN or share list was not read this cycle, emitting the
 		// Volume with the children that are known would drop its other edges
 		// for the cycle. So no Volume is a parent this cycle; its existing
-		// edges are kept.
-		final boolean volumeChildrenKnown =
-				SnapshotIsolation.volumeChildrenKnown(s.unread, s.nfsProbeFailed);
-		if (!volumeChildrenKnown) {
+		// edges are kept. Review NIT-R3: a failed NFS rule probe freezes only
+		// the Volume its share sits on; the other Volumes refresh.
+		Map<String, String> volPathByShare = new HashMap<>();
+		for (SimpleJson share : s.shares.data().get("shares").asList()) {
+			String name = share.get("name").asString();
+			if (name != null) {
+				volPathByShare.put(name, share.get("vol_path").asString());
+			}
+		}
+		final SnapshotIsolation.VolumeChildren volumeChildren =
+				SnapshotIsolation.volumeChildren(s.unread, s.nfsProbeFailed,
+						volPathByShare);
+		if (!volumeChildren.allKnown()) {
 			logInfo("Relationships: Volume child edges (LUN, NFS export, SSD "
-					+ "cache) left unchanged this cycle: " + s.unread.keySet()
-					+ " not read"
-					+ (s.nfsProbeFailed.isEmpty() ? "" : ", NFS rule probe "
-							+ "failed for share(s) " + s.nfsProbeFailed.keySet()));
+					+ "cache) left unchanged this cycle for "
+					+ (volumeChildren.noneKnown() ? "every Volume"
+							: "the Volume(s) at " + volumeChildren.frozenVolumes())
+					+ ": " + (s.unread.isEmpty() ? "" : s.unread.keySet()
+							+ " not read")
+					+ (s.nfsProbeFailed.isEmpty() ? "" : (s.unread.isEmpty()
+							? "" : ", ") + "NFS rule probe failed for share(s) "
+							+ s.nfsProbeFailed.keySet()));
 		}
 
 		// Build 31 (issue #19): the internal tree is joined by
@@ -1116,7 +1129,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		in.shares = s.shares;
 		in.ups = s.ups;
 		in.nfsExports = s.nfsRulesByShare.keySet();
-		in.volumeChildrenKnown = volumeChildrenKnown;
+		in.volumeChildren = volumeChildren;
 		SynologyTopology.build(SJ, in,
 				(parent, child) -> rb.parent(key(rb, parent), key(rb, child)),
 				this::logWarn, this::logInfo);

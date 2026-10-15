@@ -19,3 +19,4 @@ for t in AllowInsecureTest SnapshotCacheTest SnapshotTimingTest \
     java -cp "$out" "com.vcfcf.adapters.synology.$t"
 done
 python3 tests/test_allow_insecure_default.py
+python3 tests/test_snapshot_logger_once.py

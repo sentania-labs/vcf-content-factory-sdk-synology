@@ -1,5 +1,6 @@
 package com.vcfcf.adapters.synology;
 
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -21,15 +22,23 @@ import java.util.function.Consumer;
  * ({@link SynologyFailures#authCode}) the back-off is {@code authBackoffMs},
  * doubled for each further consecutive refusal up to {@code maxAuthBackoffMs};
  * after any other failure it is {@code retryBackoffMs}. A successful build
- * resets the doubling. The first caller (usually the collect-path discovery
- * step) gets the original exception; the others get a
- * {@link CachedFailureException} that describes it in its message and
- * carries its classification (DSM login refusal code, unreachable) as
- * fields, classified once when the build failed. It has no cause and no
- * stack trace, so the framework's per-resource line for it is one line,
- * not a stack trace per object per cycle. One WARN per failed build,
- * through the supplied sink; the framework still logs its own line for
- * each resource that fails.
+ * resets the doubling. Every caller, the one whose build failed included,
+ * gets a {@link CachedFailureException} that names the original (its class
+ * and message chain) in its message and carries its classification (DSM
+ * login refusal code, unreachable) as fields, classified once when the
+ * build failed. It has no cause and no stack trace, so no framework line
+ * for it is a stack trace: not the per-resource lines, and not the
+ * collect-path discovery WARN on the cycle that tried the login (before
+ * the devel_9_1 follow-up that caller got the original exception and the
+ * framework logged its 18-frame stack on the first cycle and every
+ * back-off expiry). The original, with its stack, goes to the optional
+ * debug sink given at construction. The adapter passes a logger it
+ * resolved once in configureAdapter: the framework's componentLogger
+ * resets the logger to INFO on every call (factory issue #224), so
+ * resolving it per failure would drop every DEBUG line. A fault in the
+ * sink is swallowed; it never reaches the collect path. One WARN per
+ * failed build, through the supplied sink; the framework still logs its
+ * own line for each resource that fails.
  *
  * <p><b>One build per cycle (issue #13).</b> A snapshot serves the cycle it
  * was built in and is rebuilt in the next one; {@code maxAgeMs} is only a
@@ -72,8 +81,9 @@ final class SnapshotCache<S> {
 	}
 
 	/**
-	 * A cached failure rethrown without contacting the NAS. Review W3: no
-	 * cause chain and no stack trace (the framework logs the exception it
+	 * A failed build as every caller sees it: thrown by the build that
+	 * failed (devel_9_1 follow-up) and rethrown from the cache without
+	 * contacting the NAS. Review W3: no cause chain and no stack trace (the framework logs the exception it
 	 * receives once per failed resource, so a chain here was one multi-line
 	 * stack per object per cycle). What status mapping needs is carried as
 	 * fields instead, read by {@link SynologyFailures}.
@@ -112,6 +122,7 @@ final class SnapshotCache<S> {
 	private final long retryBackoffMs;
 	private final long authBackoffMs;
 	private final long maxAuthBackoffMs;
+	private final BiConsumer<String, Exception> debug;
 
 	private long cycle;
 	private S value;
@@ -119,7 +130,7 @@ final class SnapshotCache<S> {
 	private long builtAt;
 	private int builds;
 
-	private Exception failure;
+	private String failure;
 	private int failureAuth;
 	private boolean failureUnreachable;
 	private long failureCycle;
@@ -139,6 +150,23 @@ final class SnapshotCache<S> {
 	 */
 	SnapshotCache(Clock clock, long maxAgeMs, long retryBackoffMs,
 			long authBackoffMs, long maxAuthBackoffMs) {
+		this(clock, maxAgeMs, retryBackoffMs, authBackoffMs, maxAuthBackoffMs,
+				null);
+	}
+
+	/**
+	 * As the five-argument constructor, plus the sink that receives the WARN
+	 * line and the original exception (stack included) of each failed
+	 * build, since the exception thrown to the caller has none.
+	 *
+	 * @param debug the debug sink, stored for the life of this cache (the
+	 *              adapter passes the {@code debug} method of a logger it
+	 *              resolved once in configureAdapter); may be {@code null}
+	 */
+	SnapshotCache(Clock clock, long maxAgeMs, long retryBackoffMs,
+			long authBackoffMs, long maxAuthBackoffMs,
+			BiConsumer<String, Exception> debug) {
+		this.debug = debug;
 		this.clock = clock;
 		this.maxAgeMs = maxAgeMs;
 		this.retryBackoffMs = retryBackoffMs;
@@ -166,7 +194,7 @@ final class SnapshotCache<S> {
 				throw new CachedFailureException("Synology NAS not "
 						+ "contacted: the snapshot build failed "
 						+ secondsBetween(failedAt, now) + " s ago ("
-						+ SynologyFailures.describe(failure) + "); next attempt "
+						+ failure + "); next attempt "
 						+ nextAttempt(now), failureAuth, failureUnreachable);
 			}
 			failure = null;
@@ -187,7 +215,10 @@ final class SnapshotCache<S> {
 		} catch (InterruptedException | AbortedException stop) {
 			throw stop;
 		} catch (Exception e) {
-			failure = e;
+			// devel_9_1 follow-up: the class name and the message chain of the
+			// original, kept as text; the original itself is not rethrown.
+			failure = e.getClass().getSimpleName() + ": "
+					+ SynologyFailures.describe(e);
 			failureCycle = cycle;
 			failedAt = clock.millis();
 			int auth = SynologyFailures.authCode(e);
@@ -201,7 +232,7 @@ final class SnapshotCache<S> {
 				backoff = retryBackoffMs;
 			}
 			retryAt = failedAt + backoff;
-			warn.accept("Synology snapshot build failed: "
+			String line = "Synology snapshot build failed: "
 					+ SynologyFailures.describe(e) + ". The other Synology "
 					+ "resources this cycle fail from this result without "
 					+ "contacting the NAS; next attempt "
@@ -211,8 +242,22 @@ final class SnapshotCache<S> {
 							+ " in a row: no login is tried before then unless "
 							+ "the adapter instance settings are edited, to keep "
 							+ "DSM Auto Block from blocking this collector)" : "")
-					+ ".");
-			throw e;
+					+ ".";
+			warn.accept(line);
+			if (debug != null) {
+				try {
+					debug.accept(line, e);
+				} catch (RuntimeException | LinkageError sinkFault) {
+					// A logger fault must never reach the collect path; the
+					// WARN above already carries the failure.
+				}
+			}
+			// devel_9_1 follow-up: the caller whose build failed gets the
+			// same stackless, classified exception the cache serves later,
+			// so the framework's discovery WARN on this cycle is one line.
+			throw new CachedFailureException("Synology snapshot build failed ("
+					+ failure + "); next attempt " + nextAttempt(failedAt),
+					failureAuth, failureUnreachable);
 		}
 	}
 
@@ -232,6 +277,11 @@ final class SnapshotCache<S> {
 
 	private static long secondsBetween(long from, long to) {
 		return Math.max(0L, (to - from + 999L) / 1000L);
+	}
+
+	/** Test hook: the debug sink given at construction, or null. */
+	BiConsumer<String, Exception> debugSink() {
+		return debug;
 	}
 
 	/** Test hook: how many builds were started. */

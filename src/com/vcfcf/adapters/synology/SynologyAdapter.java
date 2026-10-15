@@ -12,6 +12,7 @@ import com.vcfcf.adapter.stitch.RelationshipBuilder;
 import com.vcfcf.adapter.stitch.SuiteApiStitcher;
 
 import com.integrien.alive.common.adapter3.AdapterBase;
+import com.integrien.alive.common.adapter3.Logger;
 import com.integrien.alive.common.adapter3.MetricData;
 import com.integrien.alive.common.adapter3.MetricKey;
 import com.integrien.alive.common.adapter3.Relationships;
@@ -147,17 +148,23 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	private static final Duration LOGOUT_TIMEOUT = Duration.ofSeconds(5);
 
 	/**
-	 * One configuration's DSM API client, snapshot cache and optional-endpoint
-	 * WARN state (build 31, issue #14) (immutable).
+	 * One configuration's DSM API client, snapshot cache, the snapshot
+	 * cache's logger and optional-endpoint WARN state (build 31, issue #14)
+	 * (immutable). The logger is resolved once in configureAdapter and
+	 * stored here: componentLogger resets the logger to INFO on every call
+	 * (factory issue #224), so a per-failure lookup would make the cache's
+	 * DEBUG line unreachable even after an operator raised the level.
 	 */
 	private static final class Configured {
 		final SynologyApiClient api;
+		final Logger snapshotLog;
 		final SnapshotCache<Snapshot> snapshots;
 		final SnapshotReads reads;
 
-		Configured(SynologyApiClient api, SnapshotCache<Snapshot> snapshots,
-				SnapshotReads reads) {
+		Configured(SynologyApiClient api, Logger snapshotLog,
+				SnapshotCache<Snapshot> snapshots, SnapshotReads reads) {
 			this.api = api;
+			this.snapshotLog = snapshotLog;
 			this.snapshots = snapshots;
 			this.reads = reads;
 		}
@@ -200,6 +207,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SynologyConfig cfg = buildConfig(resourceConfig);
 		this.config = cfg;
 		this.httpClient = buildHttpClient(cfg);
+		// Resolved once per configure, never per failure (see Configured).
+		Logger snapshotLog = componentLogger(SnapshotCache.class);
 		this.configured = new Configured(
 				// Build 31 (review W5): the logout goes over its own
 				// single-attempt client with a short timeout (same TLS
@@ -208,9 +217,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 						buildHttpClient(cfg, 1, LOGOUT_TIMEOUT),
 						cfg.username, cfg.password,
 						componentLogger(SynologyApiClient.class)),
+				snapshotLog,
 				new SnapshotCache<>(System::currentTimeMillis,
 						MAX_SNAPSHOT_AGE_MS, FAILURE_RETRY_BACKOFF_MS,
-						AUTH_FAILURE_BACKOFF_MS, MAX_AUTH_FAILURE_BACKOFF_MS),
+						AUTH_FAILURE_BACKOFF_MS, MAX_AUTH_FAILURE_BACKOFF_MS,
+						snapshotLog::debug),
 				new SnapshotReads());
 
 		// Optional Datastore cross-link transport (build 16; explicit-creds
@@ -652,12 +663,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 *
 	 * <p>Build 31 (issue #12): a failed refresh is cached by the
 	 * configuration's {@link SnapshotCache}: the first caller of the cycle
-	 * (usually the collect-path discovery step) gets the original failure,
-	 * and the remaining resources fail from it without contacting the NAS
-	 * (no new login), as does every call until its back-off has passed. The
-	 * cache logs one "Synology snapshot build failed" WARN per attempted
-	 * build; the framework still logs its own line for each resource that
-	 * fails.
+	 * (usually the collect-path discovery step) gets a one-line, stackless
+	 * copy of the failure, and the remaining resources fail from the same
+	 * kind of copy without contacting the NAS (no new login), as does every
+	 * call until its back-off has passed. The cache logs one "Synology
+	 * snapshot build failed" WARN per attempted build, and the same line
+	 * with the original exception and its stack at DEBUG through the logger
+	 * stored in {@link Configured}; the framework still logs its own line
+	 * for each resource that fails.
 	 */
 	private Snapshot currentSnapshot() throws Exception {
 		Configured c = this.configured;

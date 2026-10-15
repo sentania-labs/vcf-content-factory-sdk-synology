@@ -60,6 +60,9 @@ public final class SnapshotCacheTest {
 		unreachableFailsFastAndRetriesNextCycle();
 		failureHoldsForTheRestOfTheCycle();
 		interruptIsNotCached();
+		attemptCycleIsStacklessOnEveryAttempt();
+		debugSinkIsTheStoredOne();
+		throwingDebugSinkDoesNotPropagate();
 		System.out.println("SnapshotCacheTest: all assertions passed");
 	}
 
@@ -103,9 +106,27 @@ public final class SnapshotCacheTest {
 		List<Exception> failures = cycle(c, nas, RESOURCES, warns);
 		T.eq(1, nas.logins, "no second login after an auth error in the cycle");
 		T.eq(RESOURCES, failures.size(), "every resource fails");
-		T.check(failures.get(0) instanceof SynologyDsmException,
-				"the first resource gets the original failure");
-		for (int i = 1; i < failures.size(); i++) {
+		// devel_9_1 follow-up: the attempt cycle's caller gets the same
+		// stackless, classified copy as the cached callers, so the
+		// framework's discovery WARN is one line, not an 18-frame stack.
+		Exception attempt = failures.get(0);
+		T.check(attempt instanceof SnapshotCache.CachedFailureException,
+				"the attempting resource gets the classified copy, not the "
+						+ "original: " + attempt.getClass().getName());
+		T.eq(0, attempt.getStackTrace().length,
+				"no stack frames on the attempt cycle's exception");
+		T.eq(null, attempt.getCause(), "no cause chain on the attempt copy");
+		T.eq(SynologyFailures.authCode(failures.get(1)),
+				SynologyFailures.authCode(attempt),
+				"the attempt copy is classified as the cached copy");
+		T.check(attempt.getMessage().contains("SynologyDsmException")
+				&& attempt.getMessage().contains("error code 400"),
+				"the attempt line keeps the original class and message: "
+						+ attempt.getMessage());
+		T.check(failures.get(1).getMessage().contains("SynologyDsmException"),
+				"the cached line names the original class: "
+						+ failures.get(1).getMessage());
+		for (int i = 0; i < failures.size(); i++) {
 			Exception e = failures.get(i);
 			T.check(e instanceof SnapshotCache.CachedFailureException,
 					"resource " + i + " fails from the cache");
@@ -326,6 +347,166 @@ public final class SnapshotCacheTest {
 			throw new AssertionError("wrong failure " + e);
 		}
 		T.eq(1, nas.logins, "no second build in the same cycle");
+	}
+
+	/**
+	 * devel_9_1 follow-up: on the first cycle and on every back-off expiry
+	 * (the cycles that try the login), the caller gets a stackless
+	 * exception classified as the cached one, and the original, stack
+	 * included, reaches only the debug sink. Covers a DSM login refusal
+	 * (ERROR) and an unreachable NAS (DOWN).
+	 */
+	static void attemptCycleIsStacklessOnEveryAttempt() {
+		FakeClock clock = new FakeClock();
+		FakeNas nas = new FakeNas();
+		nas.loginCode = 400;
+		List<String> warns = new ArrayList<>();
+		List<Exception> debugged = new ArrayList<>();
+		SnapshotCache<String> c = new SnapshotCache<>(clock, MAX_AGE, RETRY,
+				AUTH, AUTH_MAX, (line, e) -> debugged.add(e));
+		for (int attemptNo = 1; attemptNo <= 2; attemptNo++) {
+			c.beginCycle();
+			Exception attempt = null;
+			Exception cached = null;
+			for (int i = 0; i < 2; i++) {
+				try {
+					c.get(nas::build, warns::add);
+				} catch (Exception e) {
+					if (i == 0) attempt = e;
+					else cached = e;
+				}
+			}
+			T.eq(attemptNo, nas.logins, "attempt " + attemptNo + " logged in");
+			T.check(attempt instanceof SnapshotCache.CachedFailureException,
+					"attempt " + attemptNo + " throws the classified copy");
+			T.eq(0, attempt.getStackTrace().length,
+					"attempt " + attemptNo + " has no stack frames");
+			T.eq(attempt.getClass(), cached.getClass(),
+					"attempt and cached are the same class");
+			T.eq(400, SynologyFailures.authCode(attempt),
+					"attempt " + attemptNo + " carries its DSM 400");
+			T.eq(SynologyFailures.authCode(cached),
+					SynologyFailures.authCode(attempt),
+					"same login refusal classification as the cached copy");
+			T.eq(SynologyFailures.isUnreachable(cached),
+					SynologyFailures.isUnreachable(attempt),
+					"same reachability classification as the cached copy");
+			T.check(attempt.getMessage().contains("SynologyDsmException")
+					&& attempt.getMessage().contains("error code 400"),
+					"one line keeps class and message: " + attempt.getMessage());
+			T.check(!attempt.getMessage().contains("\n"),
+					"the message is one line");
+			clock.now += AUTH_MAX + 1; // the back-off expires
+		}
+		T.eq(2, debugged.size(), "the debug sink gets each original once");
+		T.check(debugged.get(0) instanceof SynologyDsmException
+				&& debugged.get(0).getStackTrace().length > 0,
+				"the debug sink gets the original with its stack");
+		T.eq(2, warns.size(), "one WARN per failed build");
+
+		// Unreachable: the attempt copy is DOWN exactly as the cached one.
+		FakeClock clock2 = new FakeClock();
+		SnapshotCache<String> c2 = cache(clock2);
+		SnapshotCache.Builder<String> refused = () -> {
+			throw new SynologyTransportException("transport error calling "
+					+ "SYNO.API.Auth login: Connection refused",
+					SynologyFailures.Transport.CONNECT);
+		};
+		c2.beginCycle();
+		Exception down = null;
+		Exception downCached = null;
+		for (int i = 0; i < 2; i++) {
+			try {
+				c2.get(refused, warns::add);
+			} catch (Exception e) {
+				if (i == 0) down = e;
+				else downCached = e;
+			}
+		}
+		T.check(down instanceof SnapshotCache.CachedFailureException
+				&& down.getStackTrace().length == 0,
+				"an unreachable attempt is the stackless copy too");
+		T.check(SynologyFailures.isUnreachable(down)
+				&& SynologyFailures.isUnreachable(downCached),
+				"the unreachable attempt and cached copies are both DOWN");
+		T.check(down.getMessage().contains("SynologyTransportException")
+				&& down.getMessage().contains("Connection refused"),
+				"the unreachable line keeps class and message: "
+						+ down.getMessage());
+	}
+
+	/** A debug sink that records which instance was called, and with what. */
+	static final class RecordingSink
+			implements java.util.function.BiConsumer<String, Exception> {
+		final List<String> lines = new ArrayList<>();
+		final List<Exception> originals = new ArrayList<>();
+
+		@Override
+		public void accept(String line, Exception e) {
+			lines.add(line);
+			originals.add(e);
+		}
+	}
+
+	/**
+	 * Factory issue #224: the DEBUG line goes to the sink stored at
+	 * construction (the adapter stores the logger it resolved once in
+	 * configureAdapter), on every failed build, never one resolved per
+	 * failure. tests/test_snapshot_logger_once.py pins the adapter side.
+	 */
+	static void debugSinkIsTheStoredOne() {
+		FakeClock clock = new FakeClock();
+		FakeNas nas = new FakeNas();
+		nas.loginCode = 400;
+		RecordingSink stored = new RecordingSink();
+		SnapshotCache<String> c = new SnapshotCache<>(clock, MAX_AGE, RETRY,
+				AUTH, AUTH_MAX, stored);
+		T.check(c.debugSink() == stored, "the cache keeps the sink it was given");
+		List<String> warns = new ArrayList<>();
+		cycle(c, nas, RESOURCES, warns);
+		clock.now += AUTH_MAX + 1;
+		cycle(c, nas, RESOURCES, warns);
+		T.check(c.debugSink() == stored, "still the same sink after failures");
+		T.eq(2, stored.originals.size(),
+				"the stored sink got each failed build once");
+		T.eq(warns.get(0), stored.lines.get(0),
+				"the DEBUG line is the WARN line");
+		T.check(stored.originals.get(1).getStackTrace().length > 0,
+				"the stored sink gets the original stack");
+	}
+
+	/** A logger fault never reaches the collect path. */
+	static void throwingDebugSinkDoesNotPropagate() {
+		List<Throwable> faults = new ArrayList<>();
+		faults.add(new IllegalStateException("logger closed"));
+		faults.add(new NoSuchMethodError("Logger.debug"));
+		for (Throwable fault : faults) {
+			FakeClock clock = new FakeClock();
+			FakeNas nas = new FakeNas();
+			nas.loginCode = 400;
+			int[] calls = {0};
+			SnapshotCache<String> c = new SnapshotCache<>(clock, MAX_AGE,
+					RETRY, AUTH, AUTH_MAX, (line, e) -> {
+						calls[0]++;
+						if (fault instanceof RuntimeException) {
+							throw (RuntimeException) fault;
+						}
+						throw (Error) fault;
+					});
+			List<String> warns = new ArrayList<>();
+			List<Exception> failures = cycle(c, nas, 3, warns);
+			T.eq(1, calls[0], "the sink was called (" + fault + ")");
+			T.eq(3, failures.size(), "every resource still fails normally");
+			for (Exception e : failures) {
+				T.check(e instanceof SnapshotCache.CachedFailureException,
+						"the caller gets the classified copy, not the sink "
+								+ "fault: " + e);
+			}
+			T.eq(400, SynologyFailures.authCode(failures.get(0)),
+					"classification intact after a sink fault");
+			T.eq(1, warns.size(), "the WARN was still written");
+			T.eq(1, nas.logins, "still one login");
+		}
 	}
 
 	/** Stop Collecting is not a NAS failure. */

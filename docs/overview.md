@@ -103,8 +103,11 @@ normally — collection is never failed over the optional cross-link.
   of that cycle fails from the cached result without contacting the NAS.
   The adapter log gets one `Synology snapshot build failed` WARN per
   attempted login, plus the framework's own line for the discovery step
-  and for each resource that fails from the cached result. After a
-  DSM login refusal (error 400, 401, 402, 403, 404, 406, 407, 408, 409 or
+  and for each resource that fails from the cached result. Each framework
+  line is one line naming the original failure (its class and message),
+  with no stack trace, on the cycle that tried the login as on the cycles
+  served from the cache; the original with its stack is logged at DEBUG.
+  After a DSM login refusal (error 400, 401, 402, 403, 404, 406, 407, 408, 409 or
   410, which DSM returns in the body of an HTTP 200) no login is tried for
   15 minutes, then 30, then every 60 minutes while the refusals continue,
   unless the instance is edited. Every failed login counts toward DSM Auto

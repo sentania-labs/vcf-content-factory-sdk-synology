@@ -49,15 +49,37 @@ final class SnapshotIsolation {
 	}
 
 	/**
-	 * Whether every Volume's children (LUNs from the LUN list, NFS exports
-	 * from the share list, SSD caches from storage) are known this cycle.
-	 * Own-adapter parents are full-set (the platform replaces a parent's
-	 * children with what is emitted), so when they are not, no Volume is
-	 * emitted as a parent and its existing edges are kept.
+	 * Review B2: throws when the NFS rule probe of this share failed this
+	 * cycle ({@code probeFailed} maps a share name to a one-line reason).
+	 * Its rules were not read, so an existing NFS export on it is ERROR
+	 * instead of publishing {@code rule_count = 0} and an empty
+	 * {@code allowed_clients} as if it had no rules.
 	 */
-	static boolean volumeChildrenKnown(Map<String, String> unread) {
+	static void requireNfsProbe(Map<String, String> probeFailed,
+			String share) throws IOException {
+		String reason = share == null ? null : probeFailed.get(share);
+		if (reason != null) {
+			throw new IOException("NFS rules of share " + share + " were not "
+					+ "readable this cycle (SYNO.Core.FileServ.NFS."
+					+ "SharePrivilege): " + reason);
+		}
+	}
+
+	/**
+	 * Whether every Volume's children (LUNs from the LUN list, NFS exports
+	 * from the share list and the per-share NFS rule probes, SSD caches from
+	 * storage) are known this cycle. Own-adapter parents are full-set (the
+	 * platform replaces a parent's children with what is emitted), so when
+	 * they are not, no Volume is emitted as a parent and its existing edges
+	 * are kept. Review B2: a share whose NFS rule probe failed may be an
+	 * export, so it counts like an unread share list; emitting its Volume
+	 * without it would drop that export's Volume edge for the cycle.
+	 */
+	static boolean volumeChildrenKnown(Map<String, String> unread,
+			Map<String, String> probeFailed) {
 		return !unread.containsKey(SnapshotReads.LUNS)
-				&& !unread.containsKey(SnapshotReads.SHARES);
+				&& !unread.containsKey(SnapshotReads.SHARES)
+				&& probeFailed.isEmpty();
 	}
 
 	/**

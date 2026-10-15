@@ -50,16 +50,17 @@ unread, and the framework logs its own line for each of them:
 | `SYNO.Core.Network.Interface` | DiskStation NIC count, the NFS export Datastore cross-link |
 | `SYNO.Core.CurrentConnection` | NFS client counts (DiskStation and NFS export) |
 | `SYNO.Core.Share` | NFS export objects (existing ones go ERROR), their Volume and Datastore relationships |
-| `SYNO.Core.FileServ.NFS.SharePrivilege` (per share) | that share as an NFS export |
+| `SYNO.Core.FileServ.NFS.SharePrivilege` (per share) | that share's NFS rules: an existing NFS export on it goes ERROR (no `rule_count` or `allowed_clients` is published), Volume relationships are left unchanged, and a share not yet known as an export is not discovered until its probe succeeds |
 | `SYNO.Core.ExternalDevice.UPS` | the UPS object |
 
 The UPS read and the per-share NFS rule probe keep their build 30
 logging: an INFO each cycle for UPS, a WARN each cycle per share whose
 probe fails.
 
-While the iSCSI LUN list or the share list cannot be read, no Volume
-relationships are refreshed (a Volume's LUN, NFS export and SSD cache
-edges stay as they were), so a temporary failure does not detach them.
+While the iSCSI LUN list or the share list cannot be read, or the NFS
+rule probe of any share fails, no Volume relationships are refreshed (a
+Volume's LUN, NFS export and SSD cache edges stay as they were), so a
+temporary failure does not detach them.
 
 > **Session note:** the adapter manages its own DSM session. It logs in to
 > obtain a `_sid` session token, passes `_sid` on every Web API call, and

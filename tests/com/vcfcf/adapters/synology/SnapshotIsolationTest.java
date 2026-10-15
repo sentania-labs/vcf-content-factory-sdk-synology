@@ -16,6 +16,7 @@ public final class SnapshotIsolationTest {
 		eachKindNeedsItsOwnList();
 		unreadListMakesItsObjectsError();
 		volumeChildrenFrozenWhileAListIsUnread();
+		failedNfsProbeIsNotAnExportWithoutRules();
 		reconfigureReleasesOnlyWhatWasReplaced();
 		System.out.println("SnapshotIsolationTest: all assertions passed");
 	}
@@ -68,17 +69,42 @@ public final class SnapshotIsolationTest {
 	}
 
 	static void volumeChildrenFrozenWhileAListIsUnread() {
-		T.check(SnapshotIsolation.volumeChildrenKnown(Collections.emptyMap()),
+		Map<String, String> none = Collections.emptyMap();
+		T.check(SnapshotIsolation.volumeChildrenKnown(none, none),
 				"everything read: Volumes are parents");
 		T.check(!SnapshotIsolation.volumeChildrenKnown(
-				Collections.singletonMap(SnapshotReads.LUNS, "x")),
+				Collections.singletonMap(SnapshotReads.LUNS, "x"), none),
 				"LUN list unread: no Volume is a parent");
 		T.check(!SnapshotIsolation.volumeChildrenKnown(
-				Collections.singletonMap(SnapshotReads.SHARES, "x")),
+				Collections.singletonMap(SnapshotReads.SHARES, "x"), none),
 				"share list unread: no Volume is a parent");
 		T.check(SnapshotIsolation.volumeChildrenKnown(
-				Collections.singletonMap(SnapshotReads.TARGETS, "x")),
+				Collections.singletonMap(SnapshotReads.TARGETS, "x"), none),
 				"target list unread: Volume children are still known");
+	}
+
+	/**
+	 * Review B2: a share whose NFS rule probe failed is neither published
+	 * as an export with zero rules nor dropped from its Volume.
+	 */
+	static void failedNfsProbeIsNotAnExportWithoutRules() throws Exception {
+		Map<String, String> none = Collections.emptyMap();
+		Map<String, String> failed = Collections.singletonMap("vmware",
+				"SYNO.Core.FileServ.NFS.SharePrivilege load failed: code 105");
+		try {
+			SnapshotIsolation.requireNfsProbe(failed, "vmware");
+			throw new AssertionError("an export whose rules were not read must be ERROR");
+		} catch (IOException e) {
+			T.check(e.getMessage().contains("vmware")
+					&& e.getMessage().contains("code 105"),
+					"the error names the share and the reason: " + e.getMessage());
+		}
+		SnapshotIsolation.requireNfsProbe(failed, "backups");
+		SnapshotIsolation.requireNfsProbe(failed, null);
+		SnapshotIsolation.requireNfsProbe(none, "vmware");
+		T.check(!SnapshotIsolation.volumeChildrenKnown(none, failed),
+				"a failed probe counts like an unread share list: no Volume "
+				+ "is a parent, so the export keeps its Volume edge");
 	}
 
 	static void reconfigureReleasesOnlyWhatWasReplaced() {

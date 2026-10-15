@@ -73,8 +73,9 @@ import java.util.Map;
  * <p><b>Unreadable is not invisible.</b> A REST/session failure on the per-cycle
  * snapshot refresh throws out of {@code collect()} so the framework marks the
  * resource ERROR/DOWN (never a silent empty result). Per-endpoint sub-failures
- * (UPS absent, NFS rule probe) are logged WARN/INFO and the affected resource is
- * skipped — no sentinel values are pushed for state that could not be read.
+ * are logged WARN/INFO: UPS absent skips the UPS; a failed NFS rule probe makes
+ * an existing export on that share ERROR (build 31, review B2). No sentinel
+ * values are pushed for state that could not be read.
  */
 public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
@@ -967,7 +968,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			throws IOException {
 		String name = getIdentifier(rc, "share_name");
 		// Build 31 (issue #14): dispatchCollect has already failed this
-		// export when the share list was not read this cycle.
+		// export when the share list was not read this cycle. Review B2: and
+		// when this share's NFS rule probe failed, it is ERROR too, never
+		// rule_count = 0 for rules that were not read.
+		s.requireNfsProbe(name);
 		SimpleJson share = s.findShare(name);
 		if (share == null) {
 			logWarn("collect: nfs-export " + name + " absent from snapshot");
@@ -1040,11 +1044,13 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		// for the cycle. So no Volume is a parent this cycle; its existing
 		// edges are kept.
 		final boolean volumeChildrenKnown =
-				SnapshotIsolation.volumeChildrenKnown(s.unread);
+				SnapshotIsolation.volumeChildrenKnown(s.unread, s.nfsProbeFailed);
 		if (!volumeChildrenKnown) {
 			logInfo("Relationships: Volume child edges (LUN, NFS export, SSD "
 					+ "cache) left unchanged this cycle: " + s.unread.keySet()
-					+ " not read");
+					+ " not read"
+					+ (s.nfsProbeFailed.isEmpty() ? "" : ", NFS rule probe "
+							+ "failed for share(s) " + s.nfsProbeFailed.keySet()));
 		}
 
 		// Build 31 (issue #19): the internal tree is joined by
@@ -1283,6 +1289,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			SnapshotIsolation.requireListRead(unread, kind);
 		}
 
+		/**
+		 * Review B2: throws when this share's NFS rule probe failed this
+		 * cycle; see {@link SnapshotIsolation#requireNfsProbe}.
+		 */
+		void requireNfsProbe(String share) throws IOException {
+			SnapshotIsolation.requireNfsProbe(nfsProbeFailed, share);
+		}
+
 		// Derived lookups
 		final Map<String, SimpleJson> diskIoByDevice = new HashMap<>();
 		final Map<String, SimpleJson> volIoByName = new HashMap<>();
@@ -1291,6 +1305,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		final Map<String, String> targetEnabledByName = new HashMap<>();
 		final Map<String, String> targetPortalsByName = new HashMap<>();
 		final Map<String, SimpleJson> nfsRulesByShare = new HashMap<>();
+		/**
+		 * Review B2: shares whose NFS rule probe failed this cycle, share
+		 * name to reason. Not known to be exports or not: an existing export
+		 * on one is ERROR and Volume edges are left unchanged.
+		 */
+		final Map<String, String> nfsProbeFailed = new java.util.LinkedHashMap<>();
 		final Map<String, Integer> nfsClientsByShare = new HashMap<>();
 
 		static Snapshot build(SynologyApiClient api, SnapshotReads reads,
@@ -1367,6 +1387,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					+ cacheCount + " ssd-caches / " + lunCount + " luns / "
 					+ s.nfsRulesByShare.size() + " nfs-exports / ups="
 					+ (s.ups != null)
+					+ (s.nfsProbeFailed.isEmpty() ? "" : " / nfs probe failed: "
+							+ s.nfsProbeFailed.keySet())
 					+ (s.unread.isEmpty() ? "" : " / not read: " + s.unread.keySet()));
 			if (diskCount == 0) {
 				adapter.logWarn("Synology API snapshot: 0 disks returned from "
@@ -1376,8 +1398,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 
 		private void buildLookups(SynologyApiClient api, SynologyAdapter adapter)
-				throws IOException, InterruptedException,
-				SnapshotCache.AbortedException {
+				throws Exception {
 			SimpleJson diskUtil = utilization.data().get("disk");
 			if (!diskUtil.isNull()) {
 				for (SimpleJson d : diskUtil.get("disk").asList()) {
@@ -1411,37 +1432,21 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				}
 				targetPortalsByName.put(tName, portals.toString());
 			}
-			// NFS rule probe per share (identifies a share as an NFS export);
-			// a probe failure skips that share rather than faking an export.
+			// NFS rule probe per share (identifies a share as an NFS export).
+			// A probe failure never fakes an export or its absence: the share
+			// is recorded in nfsProbeFailed (review B2), so an existing export
+			// on it is ERROR and Volume edges are left unchanged this cycle.
+			// See NfsProbes.
+			List<String> shareNames = new ArrayList<>();
 			for (SimpleJson share : shares.data().get("shares").asList()) {
-				String name = share.get("name").asString();
-				adapter.checkpoint("NFS rule probe for share " + name);
-				try {
-					SimpleJson rules = api.nfsSharePrivilege(name);
-					if (rules.data().get("rule").size() > 0) {
-						nfsRulesByShare.put(name, rules);
-					}
-				} catch (InterruptedException ie) {
-					throw ie;
-				} catch (Exception e) {
-					// Build 31 (issue #13): the NAS stopped accepting
-					// connections. Every further probe would wait out the
-					// same timeouts, so the build fails here instead of
-					// probing each remaining share in turn.
-					if (SynologyFailures.isConnectFailure(e)) {
-						throw new IOException("NFS rule probe for share " + name
-								+ " could not connect to the NAS: "
-								+ e.getMessage(), e);
-					}
-					// Build 31 (issue #14): a refused re-login fails the build
-					// too; probing on would send one failed login per share.
-					if (SynologyFailures.authCode(e) != 0) {
-						throw e;
-					}
-					adapter.logWarn("Snapshot: NFS rule probe failed for share "
-							+ name + ": " + e.getMessage());
-				}
+				shareNames.add(share.get("name").asString());
 			}
+			NfsProbes.Result<SimpleJson> probes = NfsProbes.run(shareNames,
+					api::nfsSharePrivilege,
+					rules -> rules.data().get("rule").size(),
+					adapter::checkpoint, adapter::logWarn);
+			nfsRulesByShare.putAll(probes.rulesByShare);
+			nfsProbeFailed.putAll(probes.failed);
 			for (SimpleJson conn : connections.data().get("items").asList()) {
 				if ("NFS".equals(conn.get("protocol").asString())) {
 					String descr = conn.get("descr").asString("");

@@ -20,6 +20,16 @@ import java.io.IOException;
  * issue #12 hazard). A login already in flight when the client is closed
  * has its new session logged straight out.
  *
+ * <p><b>No orphan session (review NIT-R2).</b> The login's "closed yet?"
+ * check and its store of the new session id run under one lock, and so do
+ * {@link #close}'s "mark closed, take the session id" steps. So either the
+ * login stores first and close takes and logs out that session, or close
+ * runs first and the login sees it closed and logs its session out.
+ * Before, a login could pass its check, close could then find no session
+ * and log nothing out, and only then would the login store its id: one
+ * session left for DSM to expire. The DSM calls themselves (login and
+ * logout) run outside the lock.
+ *
  * <p>The logout call itself is the client's to bound (a single attempt
  * with a short timeout); it must not throw.
  */
@@ -37,8 +47,14 @@ final class DsmSession {
 
 	private final Login loginCall;
 	private final Logout logoutCall;
+	private final Object lock = new Object();
 	private volatile String sid;
 	private volatile boolean closed;
+	/**
+	 * Test seam (review NIT-R2): run under the lock, between the login's
+	 * closed check and its store. {@code null} in production.
+	 */
+	volatile Runnable beforeStore;
 
 	DsmSession(Login loginCall, Logout logoutCall) {
 		this.loginCall = loginCall;
@@ -59,14 +75,18 @@ final class DsmSession {
 	String login() throws IOException, InterruptedException {
 		if (closed) throw new SynologyClientClosedException();
 		String s = loginCall.login();
-		if (closed) {
-			// Closed while this login was in flight: log the new session
-			// straight out rather than leave it behind.
-			logoutQuietly(s);
-			throw new SynologyClientClosedException();
+		synchronized (lock) {
+			if (!closed) {
+				Runnable hook = beforeStore;
+				if (hook != null) hook.run();
+				sid = s;
+				return s;
+			}
 		}
-		sid = s;
-		return s;
+		// Closed while this login was in flight: log the new session
+		// straight out rather than leave it behind.
+		logoutQuietly(s);
+		throw new SynologyClientClosedException();
 	}
 
 	/** Logs in when there is no session; throws when closed. */
@@ -82,15 +102,23 @@ final class DsmSession {
 
 	/** Logs the session out (if any) and forgets it; the client stays open. */
 	void logout() {
-		String s = sid;
-		sid = null;
+		String s;
+		synchronized (lock) {
+			s = sid;
+			sid = null;
+		}
 		if (s != null) logoutQuietly(s);
 	}
 
 	/** Closes the client for good: no login after this, then logout. */
 	void close() {
-		closed = true;
-		logout();
+		String s;
+		synchronized (lock) {
+			closed = true;
+			s = sid;
+			sid = null;
+		}
+		if (s != null) logoutQuietly(s);
 	}
 
 	private void logoutQuietly(String s) {

@@ -98,6 +98,18 @@ for:
   success-shaped but empty payload for a critical endpoint; the adapter
   surfaces this as ERROR rather than publishing `0.0` sentinels. Verify the
   DSM account can read system and utilization info.
+- **Every Synology object is ERROR after a password change** (build 31+).
+  The adapter log has one WARN `Synology snapshot build failed: Synology
+  login failed: error code 400 ...`. After a DSM login refusal the adapter
+  does not log in again for 15 minutes (30, then 60 minutes if the
+  refusals continue), to keep DSM Auto Block from blocking the collector's
+  IP. Edit the adapter instance with the new password: the edit takes
+  effect on the next cycle without waiting out the back-off.
+- **The adapter log names DSM login error 407** (source IP blocked). DSM
+  Auto Block has already blocked the collector's IP, usually after earlier
+  failed logins from this or another integration. Clear the block in DSM
+  (Control Panel > Security > Protection, Auto Block, Allow/Block List), fix the
+  password if needed, then edit the adapter instance.
 - **No Datastore cross-link appears** — expected on a collector without
   ambient Suite API access, or when no VMware datastore is backed by this
   NAS. Storage collection is unaffected.

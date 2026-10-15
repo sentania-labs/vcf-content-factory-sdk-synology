@@ -80,7 +80,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	private static final String ADAPTER_KIND = "synology_diskstation";
 
-	private volatile SynologyApiClient api;
+	/**
+	 * Build 31 (issue #12): the DSM API client and the snapshot cache of one
+	 * configuration, published together by one volatile write in
+	 * {@link #configureAdapter}. An instance edit publishes a new holder, so
+	 * a cached failure (and its login back-off) never outlives the settings
+	 * it failed with, and a call never pairs one configuration's client with
+	 * another's cache. Null until the first configure.
+	 */
+	private volatile Configured configured;
 
 	/**
 	 * Ambient Suite API transport for the optional Datastore cross-link, and the
@@ -93,13 +101,45 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	/**
 	 * Per-cycle snapshot of the Synology API responses, shared across all
-	 * per-resource {@code collect()} calls within one collection cycle. Refreshed
-	 * at most once per {@code minRefreshIntervalMs}. {@code volatile} for
-	 * cross-thread visibility (collect runs single-threaded per instance, but the
-	 * field may be read by the relationship pass).
+	 * per-resource {@code collect()} calls within one collection cycle, lives in
+	 * the {@link SnapshotCache} of the current {@link Configured} holder. A
+	 * snapshot older than this is rebuilt.
 	 */
-	private volatile Snapshot snapshot;
 	private static final long MIN_REFRESH_INTERVAL_MS = 60_000L;
+
+	/**
+	 * Build 31 (issue #12): after a failed snapshot build that is not an
+	 * authentication refusal, no new build before this has passed (and never
+	 * in the same cycle). Shorter than the 5-minute default collection
+	 * interval, so an unreachable NAS is tried once per cycle.
+	 */
+	private static final long FAILURE_RETRY_BACKOFF_MS = 60_000L;
+
+	/**
+	 * Build 31 (issue #12): after the first authentication-class DSM login
+	 * refusal (error 400, 401, 402, 403, 404, 406, 407, 408, 409 or 410), no
+	 * new build (and so no login) before this has passed, unless the
+	 * instance is edited. Doubled for each further consecutive refusal, up
+	 * to {@link #MAX_AUTH_FAILURE_BACKOFF_MS}: at the default 5-minute
+	 * interval a wrong password costs one failed login after 15, 30, then
+	 * every 60 minutes, instead of one per resource per cycle, far below
+	 * DSM Auto Block's default threshold.
+	 */
+	private static final long AUTH_FAILURE_BACKOFF_MS = 15L * 60_000L;
+
+	/** Build 31 (issue #12): the cap on the doubled authentication back-off. */
+	private static final long MAX_AUTH_FAILURE_BACKOFF_MS = 60L * 60_000L;
+
+	/** One configuration's DSM API client and snapshot cache (immutable). */
+	private static final class Configured {
+		final SynologyApiClient api;
+		final SnapshotCache<Snapshot> snapshots;
+
+		Configured(SynologyApiClient api, SnapshotCache<Snapshot> snapshots) {
+			this.api = api;
+			this.snapshots = snapshots;
+		}
+	}
 
 	public SynologyAdapter() {
 		super(ADAPTER_KIND);
@@ -126,9 +166,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SynologyConfig cfg = buildConfig(resourceConfig);
 		this.config = cfg;
 		this.httpClient = buildHttpClient(cfg);
-		this.api = new SynologyApiClient(httpClient, cfg.username, cfg.password,
-				componentLogger(SynologyApiClient.class));
-		this.snapshot = null;
+		this.configured = new Configured(
+				new SynologyApiClient(httpClient, cfg.username, cfg.password,
+						componentLogger(SynologyApiClient.class)),
+				new SnapshotCache<>(System::currentTimeMillis,
+						MIN_REFRESH_INTERVAL_MS, FAILURE_RETRY_BACKOFF_MS,
+						AUTH_FAILURE_BACKOFF_MS, MAX_AUTH_FAILURE_BACKOFF_MS));
 
 		// Optional Datastore cross-link transport (build 16; explicit-creds
 		// branch build 21). Two paths, selected by config:
@@ -236,7 +279,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	// -----------------------------------------------------------------------
 	// getTester — self-contained (controller calls it on a BARE instance:
-	// configureAdapter has NOT run, so this.api / this.config are null). Derive
+	// configureAdapter has NOT run, so this.configured / this.config are null). Derive
 	// everything from the ResourceConfig on the TestParam. Mirror compliance
 	// build-46 tester pattern.
 	// -----------------------------------------------------------------------
@@ -298,6 +341,34 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	@Override
 	protected boolean discoverOnCollect() {
 		return true;
+	}
+
+	/**
+	 * Build 31 (issue #12): a discovery pass is its own cycle for the
+	 * snapshot cache, so a failure cached by a collection cycle stops
+	 * blocking only by its back-off, not by a discovery call. Otherwise the
+	 * framework default: {@link #enumerateResources(ResourceSink)} into the
+	 * discovery result.
+	 */
+	@Override
+	@SuppressWarnings("rawtypes")
+	protected com.vcfcf.adapter.spi.VcfCfDiscoverer getDiscoverer() {
+		return (cfg, http, param, dr) -> {
+			beginCycle();
+			enumerateResources(dr::addResource);
+		};
+	}
+
+	/**
+	 * Build 31 (issue #12): marks the start of a collection or discovery
+	 * pass in the current configuration's snapshot cache. A no-op before
+	 * the first configure.
+	 */
+	private void beginCycle() {
+		Configured c = this.configured;
+		if (c != null) {
+			c.snapshots.beginCycle();
+		}
 	}
 
 	/**
@@ -407,6 +478,19 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	@Override
 	protected VcfCfCollector<SynologyConfig> getCollector() {
 		return new VcfCfCollector<SynologyConfig>() {
+			/**
+			 * Build 31 (issue #12): the framework calls this exactly once at
+			 * the top of every onCollect, before discovery and the
+			 * per-resource loop, so it is the start-of-cycle hook for the
+			 * snapshot cache. Never asks for the hand-rolled rediscovery
+			 * (always false), exactly as the framework default did.
+			 */
+			@Override
+			public boolean needsRediscovery(SynologyConfig cfg) {
+				beginCycle();
+				return false;
+			}
+
 			@Override
 			public void collect(SynologyConfig cfg, ManagedHttpClient http,
 					ResourceConfig rc, List<MetricData> out, AdapterBase adapter)
@@ -445,18 +529,24 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	/**
 	 * Return the snapshot for this cycle, refreshing it if it is null or older
 	 * than {@link #MIN_REFRESH_INTERVAL_MS}. A refresh failure (session/REST
-	 * error) propagates out so the framework marks the resource ERROR/DOWN —
+	 * error) propagates out so the framework marks the resource ERROR/DOWN,
 	 * never a silent empty snapshot.
+	 *
+	 * <p>Build 31 (issue #12): a failed refresh is cached by the
+	 * configuration's {@link SnapshotCache}: the remaining resources of the
+	 * cycle fail from it without contacting the NAS (one WARN, no new
+	 * login), and so does every call until its back-off has passed.
 	 */
-	private synchronized Snapshot currentSnapshot() throws Exception {
-		Snapshot s = this.snapshot;
-		long now = System.currentTimeMillis();
-		if (s == null || (now - s.builtAt) >= MIN_REFRESH_INTERVAL_MS) {
-			api.ensureSession();
-			s = Snapshot.build(api, this);
-			this.snapshot = s;
+	private Snapshot currentSnapshot() throws Exception {
+		Configured c = this.configured;
+		if (c == null) {
+			throw new IllegalStateException("Synology adapter instance is not "
+					+ "configured");
 		}
-		return s;
+		return c.snapshots.get(() -> {
+			c.api.ensureSession();
+			return Snapshot.build(c.api, this);
+		}, this::logWarn);
 	}
 
 	private void dispatchCollect(ResourceConfig rc, Snapshot snap,
@@ -1085,13 +1175,13 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	@Override
 	public void onDiscard() {
-		SynologyApiClient a = this.api;
-		if (a != null) a.logout();
+		Configured c = this.configured;
+		if (c != null) c.api.logout();
 		SuiteApiStitcher s = this.suiteStitcher;
 		if (s != null) s.discard();
 		this.suiteStitcher = null;
 		this.stitcher = null;
-		this.snapshot = null;
+		this.configured = null;
 		super.onDiscard();
 	}
 

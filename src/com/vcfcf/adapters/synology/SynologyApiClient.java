@@ -55,7 +55,14 @@ public final class SynologyApiClient {
 		SimpleJson resp = callRaw(path, "SYNO.API.Auth login");
 		if (!resp.isSuccess()) {
 			int code = (int) resp.get("error").get("code").asLong();
-			throw new IOException("Synology login failed: error code " + code);
+			// Build 31 (issue #12): typed, so an authentication-class refusal
+			// (DSM error code in the body of a 200) is recognized by code, not
+			// by message text, and is never retried within the cycle. No
+			// account, password or session id in the message.
+			String meaning = SynologyFailures.loginCodeMeaning(code);
+			throw new SynologyDsmException("Synology login failed: error code "
+					+ code + (meaning.isEmpty() ? "" : " (" + meaning + ")"),
+					code, true);
 		}
 		this.sid = resp.data().get("sid").asString();
 		log.info("Synology login succeeded, session=" + SESSION_NAME);

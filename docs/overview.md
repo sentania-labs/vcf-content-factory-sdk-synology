@@ -96,6 +96,19 @@ normally — collection is never failed over the optional cross-link.
   (`discoverOnCollect()`), so a freshly created instance populates on its
   first collection cycle. Enumeration serves from the same per-cycle
   snapshot it collects from (no redundant, rate-limit-hostile API pulls).
+- **A failed login is not retried per resource (build 31).** When the
+  per-cycle snapshot cannot be built (wrong or rotated password, disabled
+  account, NAS down), the failure is cached: the first resource reports
+  it, every other resource of that cycle fails from the cached result
+  without contacting the NAS, and the adapter log gets one WARN. After a
+  DSM login refusal (error 400, 401, 402, 403, 404, 406, 407, 408, 409 or
+  410, which DSM returns in the body of an HTTP 200) no login is tried for
+  15 minutes, then 30, then every 60 minutes while the refusals continue,
+  unless the instance is edited. Every failed login counts toward DSM Auto
+  Block, which blocks the collector's IP (possibly shared with other
+  integrations), so a wrong password now costs a handful of failed logins
+  over hours instead of one per resource per cycle. Any other failure is
+  tried again on the next cycle.
 
 ## Known Limitations
 

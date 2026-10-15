@@ -12,6 +12,7 @@ import com.vcfcf.adapter.stitch.RelationshipBuilder;
 import com.vcfcf.adapter.stitch.SuiteApiStitcher;
 
 import com.integrien.alive.common.adapter3.AdapterBase;
+import com.integrien.alive.common.adapter3.Logger;
 import com.integrien.alive.common.adapter3.MetricData;
 import com.integrien.alive.common.adapter3.MetricKey;
 import com.integrien.alive.common.adapter3.Relationships;
@@ -73,14 +74,23 @@ import java.util.Map;
  * <p><b>Unreadable is not invisible.</b> A REST/session failure on the per-cycle
  * snapshot refresh throws out of {@code collect()} so the framework marks the
  * resource ERROR/DOWN (never a silent empty result). Per-endpoint sub-failures
- * (UPS absent, NFS rule probe) are logged WARN/INFO and the affected resource is
- * skipped — no sentinel values are pushed for state that could not be read.
+ * are logged WARN/INFO: UPS absent skips the UPS; a failed NFS rule probe makes
+ * an existing export on that share ERROR (build 31, review B2). No sentinel
+ * values are pushed for state that could not be read.
  */
 public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	private static final String ADAPTER_KIND = "synology_diskstation";
 
-	private volatile SynologyApiClient api;
+	/**
+	 * Build 31 (issue #12): the DSM API client and the snapshot cache of one
+	 * configuration, published together by one volatile write in
+	 * {@link #configureAdapter}. An instance edit publishes a new holder, so
+	 * a cached failure (and its login back-off) never outlives the settings
+	 * it failed with, and a call never pairs one configuration's client with
+	 * another's cache. Null until the first configure.
+	 */
+	private volatile Configured configured;
 
 	/**
 	 * Ambient Suite API transport for the optional Datastore cross-link, and the
@@ -93,13 +103,72 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	/**
 	 * Per-cycle snapshot of the Synology API responses, shared across all
-	 * per-resource {@code collect()} calls within one collection cycle. Refreshed
-	 * at most once per {@code minRefreshIntervalMs}. {@code volatile} for
-	 * cross-thread visibility (collect runs single-threaded per instance, but the
-	 * field may be read by the relationship pass).
+	 * per-resource {@code collect()} calls within one collection cycle, lives in
+	 * the {@link SnapshotCache} of the current {@link Configured} holder.
+	 *
+	 * <p>Build 31 (issue #13): one build per collection cycle. The cycle, not
+	 * the clock, decides reuse; this age (counted from the end of the build)
+	 * is only a safety net that rebuilds a snapshot in a cycle that has run
+	 * this long. Before build 31 the snapshot was rebuilt after 60 s counted
+	 * from the start of its build, so a build slower than 60 s was rebuilt by
+	 * every resource.
 	 */
-	private volatile Snapshot snapshot;
-	private static final long MIN_REFRESH_INTERVAL_MS = 60_000L;
+	private static final long MAX_SNAPSHOT_AGE_MS = 15L * 60_000L;
+
+	/**
+	 * Build 31 (issue #12): after a failed snapshot build that is not an
+	 * authentication refusal, no new build before this has passed (and never
+	 * in the same cycle). Shorter than the 5-minute default collection
+	 * interval, so an unreachable NAS is tried once per cycle.
+	 */
+	private static final long FAILURE_RETRY_BACKOFF_MS = 60_000L;
+
+	/**
+	 * Build 31 (issue #12): after the first authentication-class DSM login
+	 * refusal (error 400, 401, 402, 403, 404, 406, 407, 408, 409 or 410), no
+	 * new build (and so no login) before this has passed, unless the
+	 * instance is edited. Doubled for each further consecutive refusal, up
+	 * to {@link #MAX_AUTH_FAILURE_BACKOFF_MS}: at the default 5-minute
+	 * interval a wrong password costs one failed login after 15, 30, then
+	 * every 60 minutes, instead of one per resource per cycle, far below
+	 * DSM Auto Block's default threshold.
+	 */
+	private static final long AUTH_FAILURE_BACKOFF_MS = 15L * 60_000L;
+
+	/** Build 31 (issue #12): the cap on the doubled authentication back-off. */
+	private static final long MAX_AUTH_FAILURE_BACKOFF_MS = 60L * 60_000L;
+
+	/**
+	 * Build 31 (review W5): the connect and read timeout of the DSM logout
+	 * sent when a configuration is released (instance edited or removed),
+	 * in one attempt. A logout that times out leaves an idle session for
+	 * DSM to expire; before, an unreachable old NAS held configure (or
+	 * discard) for three 30 s attempts.
+	 */
+	private static final Duration LOGOUT_TIMEOUT = Duration.ofSeconds(5);
+
+	/**
+	 * One configuration's DSM API client, snapshot cache, the snapshot
+	 * cache's logger and optional-endpoint WARN state (build 31, issue #14)
+	 * (immutable). The logger is resolved once in configureAdapter and
+	 * stored here: componentLogger resets the logger to INFO on every call
+	 * (factory issue #224), so a per-failure lookup would make the cache's
+	 * DEBUG line unreachable even after an operator raised the level.
+	 */
+	private static final class Configured {
+		final SynologyApiClient api;
+		final Logger snapshotLog;
+		final SnapshotCache<Snapshot> snapshots;
+		final SnapshotReads reads;
+
+		Configured(SynologyApiClient api, Logger snapshotLog,
+				SnapshotCache<Snapshot> snapshots, SnapshotReads reads) {
+			this.api = api;
+			this.snapshotLog = snapshotLog;
+			this.snapshots = snapshots;
+			this.reads = reads;
+		}
+	}
 
 	public SynologyAdapter() {
 		super(ADAPTER_KIND);
@@ -123,12 +192,37 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	@Override
 	protected void configureAdapter(ResourceStatus status,
 			ResourceConfig resourceConfig) {
+		// Build 31 (issue #21): the configuration this one replaces. Released
+		// (DSM client closed and logged out, Suite API stitcher discarded)
+		// once the new one is published, by the same teardown onDiscard uses.
+		// Before build 31 an edit left the old DSM session open until DSM
+		// expired it, and the old Suite API session unreleased. The old HTTP
+		// client is not ours to release here: the framework's onConfigure
+		// discards it and clears this.httpClient before calling
+		// configureAdapter (review NIT-1). The old DSM logout does not use
+		// it; it goes over the old API client's own logout client.
+		final Configured oldConfigured = this.configured;
+		final SuiteApiStitcher oldSuiteStitcher = this.suiteStitcher;
+
 		SynologyConfig cfg = buildConfig(resourceConfig);
 		this.config = cfg;
 		this.httpClient = buildHttpClient(cfg);
-		this.api = new SynologyApiClient(httpClient, cfg.username, cfg.password,
-				componentLogger(SynologyApiClient.class));
-		this.snapshot = null;
+		// Resolved once per configure, never per failure (see Configured).
+		Logger snapshotLog = componentLogger(SnapshotCache.class);
+		this.configured = new Configured(
+				// Build 31 (review W5): the logout goes over its own
+				// single-attempt client with a short timeout (same TLS
+				// settings), so releasing this configuration later is bounded.
+				new SynologyApiClient(httpClient,
+						buildHttpClient(cfg, 1, LOGOUT_TIMEOUT),
+						cfg.username, cfg.password,
+						componentLogger(SynologyApiClient.class)),
+				snapshotLog,
+				new SnapshotCache<>(System::currentTimeMillis,
+						MAX_SNAPSHOT_AGE_MS, FAILURE_RETRY_BACKOFF_MS,
+						AUTH_FAILURE_BACKOFF_MS, MAX_AUTH_FAILURE_BACKOFF_MS,
+						snapshotLog::debug),
+				new SnapshotReads());
 
 		// Optional Datastore cross-link transport (build 16; explicit-creds
 		// branch build 21). Two paths, selected by config:
@@ -194,6 +288,63 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		logInfo("SynologyAdapter configured: host=" + cfg.host
 				+ " port=" + cfg.port + " allowInsecure=" + cfg.allowInsecure
 				+ " datastoreCrossLink=" + (stitcher != null));
+		// Build 31 (issue #15): one WARN per configure while insecure mode is on.
+		String insecure = cfg.insecureWarning();
+		if (insecure != null) {
+			logWarn(insecure);
+		}
+
+		// Build 31 (issue #21): release the replaced configuration. The new
+		// API client has not logged in yet (its first snapshot build does),
+		// so the old session's logout cannot end the new one.
+		releaseConfiguration("instance reconfigured", oldConfigured,
+				SnapshotIsolation.replaced(oldSuiteStitcher, this.suiteStitcher));
+	}
+
+	/**
+	 * Build 31 (issue #21): the teardown shared by {@link #configureAdapter}
+	 * (for the configuration it replaces) and {@link #onDiscard}. Closes the
+	 * old DSM API client first (review W5: marked closed so a cycle still
+	 * running on it never logs in again, then its session is logged out in
+	 * one attempt bounded by {@link #LOGOUT_TIMEOUT}), then discards the
+	 * Suite API stitcher. Best effort: every step runs, a failure is one
+	 * WARN, nothing is thrown. Null arguments are skipped. The main HTTP
+	 * client is the framework's to discard (review NIT-1): its onConfigure
+	 * does it before configureAdapter, and super.onDiscard() on discard. The
+	 * dedicated logout client is discarded by the API client's close
+	 * (Codex P2).
+	 */
+	private void releaseConfiguration(String why, Configured c,
+			SuiteApiStitcher st) {
+		Teardown.run(why, this::logWarn,
+				Teardown.step("DSM logout", c == null ? null : c.api::close),
+				Teardown.step("Suite API stitcher discard",
+						st == null ? null : st::discard));
+	}
+
+	// -----------------------------------------------------------------------
+	// certificateCheckUrls (framework hook; build 31, review W1)
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Build 31 (review W1): the NAS endpoint VCF Operations reviews on
+	 * Validate Connection, so an untrusted certificate (DSM's factory
+	 * self-signed one, for example) brings up the Review and Accept
+	 * Certificate dialog instead of failing Test Connection. The accepted
+	 * certificate is stored on the instance and trusted by
+	 * {@code platformSsl(this)} on every cycle, with validation still on.
+	 * Derived only from the passed, possibly unsaved config, never from
+	 * instance state; empty when Allow Insecure SSL is on (read with this
+	 * pak's own {@link SynologyConfig#parseAllowInsecure}, the parse the
+	 * client uses, not the framework's trimmed one). See
+	 * {@link SynologyConfig#certificateCheckUrls}. {@code @Override} on
+	 * purpose, as compliance build 93: a buildkit without the hook must fail
+	 * to compile rather than build a pak that never offers the dialog.
+	 */
+	@Override
+	protected List<String> certificateCheckUrls(ResourceConfig rc) {
+		return SynologyConfig.certificateCheckUrls(getIdentifier(rc, "host"),
+				getIdentifier(rc, "port"), getIdentifier(rc, "allowInsecure"));
 	}
 
 	private SynologyConfig buildConfig(ResourceConfig rc) {
@@ -211,16 +362,35 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				suiteApiUrl, suiteApiUser, suiteApiPassword);
 	}
 
+	/**
+	 * Build 31 (issue #13): the timeout stays one 30 s value for connect and
+	 * read because the framework {@link HttpClientBuilder} exposes only
+	 * {@code timeout(Duration)}, applied to both. What bounds a cycle against
+	 * an unreachable NAS is the {@link SnapshotCache}: at most one snapshot
+	 * build per cycle, a connect failure ends that build, and the other
+	 * resources fail from the cached result.
+	 */
 	private ManagedHttpClient buildHttpClient(SynologyConfig cfg) {
+		return buildHttpClient(cfg, 3, Duration.ofSeconds(30));
+	}
+
+	/**
+	 * Build 31 (review W5): the same client with a given attempt count and
+	 * timeout (the bounded logout client uses one attempt and
+	 * {@link #LOGOUT_TIMEOUT}).
+	 */
+	private ManagedHttpClient buildHttpClient(SynologyConfig cfg,
+			int attempts, Duration timeout) {
 		HttpClientBuilder b = HttpClientBuilder.builder()
 				.baseUrl(cfg.baseUrl())
 				.retryPolicy(RetryPolicy.builder()
-						.maxAttempts(3)
+						.maxAttempts(attempts)
 						.baseDelayMs(1000)
 						.build())
-				.timeout(Duration.ofSeconds(30));
+				.timeout(timeout);
 		if (cfg.allowInsecure) {
 			// Lab opt-out: Synology DSM ships a self-signed cert by default.
+			// Build 31 (issue #15): only an explicit "true" gets here.
 			b.allowInsecure(true);
 		} else {
 			b.platformSsl(this);
@@ -230,7 +400,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	// -----------------------------------------------------------------------
 	// getTester — self-contained (controller calls it on a BARE instance:
-	// configureAdapter has NOT run, so this.api / this.config are null). Derive
+	// configureAdapter has NOT run, so this.configured / this.config are null). Derive
 	// everything from the ResourceConfig on the TestParam. Mirror compliance
 	// build-46 tester pattern.
 	// -----------------------------------------------------------------------
@@ -292,6 +462,34 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	@Override
 	protected boolean discoverOnCollect() {
 		return true;
+	}
+
+	/**
+	 * Build 31 (issue #12): a discovery pass is its own cycle for the
+	 * snapshot cache, so a failure cached by a collection cycle stops
+	 * blocking only by its back-off, not by a discovery call. Otherwise the
+	 * framework default: {@link #enumerateResources(ResourceSink)} into the
+	 * discovery result.
+	 */
+	@Override
+	@SuppressWarnings("rawtypes")
+	protected com.vcfcf.adapter.spi.VcfCfDiscoverer getDiscoverer() {
+		return (cfg, http, param, dr) -> {
+			beginCycle();
+			enumerateResources(dr::addResource);
+		};
+	}
+
+	/**
+	 * Build 31 (issue #12): marks the start of a collection or discovery
+	 * pass in the current configuration's snapshot cache. A no-op before
+	 * the first configure.
+	 */
+	private void beginCycle() {
+		Configured c = this.configured;
+		if (c != null) {
+			c.snapshots.beginCycle();
+		}
 	}
 
 	/**
@@ -401,6 +599,19 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	@Override
 	protected VcfCfCollector<SynologyConfig> getCollector() {
 		return new VcfCfCollector<SynologyConfig>() {
+			/**
+			 * Build 31 (issue #12): the framework calls this exactly once at
+			 * the top of every onCollect, before discovery and the
+			 * per-resource loop, so it is the start-of-cycle hook for the
+			 * snapshot cache. Never asks for the hand-rolled rediscovery
+			 * (always false), exactly as the framework default did.
+			 */
+			@Override
+			public boolean needsRediscovery(SynologyConfig cfg) {
+				beginCycle();
+				return false;
+			}
+
 			@Override
 			public void collect(SynologyConfig cfg, ManagedHttpClient http,
 					ResourceConfig rc, List<MetricData> out, AdapterBase adapter)
@@ -426,9 +637,19 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				}
 			}
 
+			/**
+			 * Build 31 (issue #13): DOWN when the NAS could not be reached
+			 * (connect refused, connect or request timeout, unknown host, no
+			 * route), found anywhere in the cause chain, including a cached
+			 * snapshot failure. ERROR for DSM login refusals, certificate
+			 * failures, unreadable payloads and anything else. Before build
+			 * 31 only a bare ConnectException was DOWN, and the API client
+			 * never threw one (it rethrows every transport failure as an
+			 * IOException), so an unreachable NAS was always ERROR.
+			 */
 			@Override
 			public ResourceStatusEnum mapCollectException(Exception e) {
-				if (e instanceof java.net.ConnectException) {
+				if (SynologyFailures.isUnreachable(e)) {
 					return ResourceStatusEnum.RESOURCE_STATUS_DOWN;
 				}
 				return ResourceStatusEnum.RESOURCE_STATUS_ERROR;
@@ -437,26 +658,63 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	}
 
 	/**
-	 * Return the snapshot for this cycle, refreshing it if it is null or older
-	 * than {@link #MIN_REFRESH_INTERVAL_MS}. A refresh failure (session/REST
-	 * error) propagates out so the framework marks the resource ERROR/DOWN —
-	 * never a silent empty snapshot.
+	 * Return the snapshot for this cycle, building it on the cycle's first
+	 * call (or after {@link #MAX_SNAPSHOT_AGE_MS} in an endless cycle). A
+	 * refresh failure (session/REST error) propagates out so the framework
+	 * marks the resource ERROR/DOWN, never a silent empty snapshot.
+	 *
+	 * <p>Build 31 (issue #12): a failed refresh is cached by the
+	 * configuration's {@link SnapshotCache}: the first caller of the cycle
+	 * (usually the collect-path discovery step) gets a one-line, stackless
+	 * copy of the failure, and the remaining resources fail from the same
+	 * kind of copy without contacting the NAS (no new login), as does every
+	 * call until its back-off has passed. The cache logs one "Synology
+	 * snapshot build failed" WARN per attempted build, and the same line
+	 * with the original exception and its stack at DEBUG through the logger
+	 * stored in {@link Configured}; the framework still logs its own line
+	 * for each resource that fails.
 	 */
-	private synchronized Snapshot currentSnapshot() throws Exception {
-		Snapshot s = this.snapshot;
-		long now = System.currentTimeMillis();
-		if (s == null || (now - s.builtAt) >= MIN_REFRESH_INTERVAL_MS) {
-			api.ensureSession();
-			s = Snapshot.build(api, this);
-			this.snapshot = s;
+	private Snapshot currentSnapshot() throws Exception {
+		Configured c = this.configured;
+		if (c == null) {
+			throw new IllegalStateException("Synology adapter instance is not "
+					+ "configured");
 		}
-		return s;
+		// Review NIT-3: the login runs inside the read plan, after its own
+		// abort check (SnapshotReads.read), not before the first checkpoint.
+		return c.snapshots.get(() -> Snapshot.build(c.api, c.reads, this),
+				this::logWarn);
+	}
+
+	/**
+	 * Build 31 (issue #13): called between DSM calls while a snapshot is
+	 * built. A thread interrupt ends the build with an
+	 * {@link InterruptedException}, which the framework turns into a cycle
+	 * abort; Stop Collecting (the framework's abort flag) ends it with a
+	 * {@link SnapshotCache.AbortedException}. Neither is cached as a NAS
+	 * failure. Without this a stop waited out every remaining call, each up
+	 * to three 30 s timeouts against a hung NAS.
+	 */
+	void checkpoint(String next) throws InterruptedException,
+			SnapshotCache.AbortedException {
+		if (Thread.currentThread().isInterrupted()) {
+			throw new InterruptedException("Synology snapshot build interrupted "
+					+ "before " + next);
+		}
+		if (isAbortRequested()) {
+			throw new SnapshotCache.AbortedException("Stop Collecting "
+					+ "requested: Synology snapshot build stopped before " + next);
+		}
 	}
 
 	private void dispatchCollect(ResourceConfig rc, Snapshot snap,
-			List<MetricData> out) {
+			List<MetricData> out) throws IOException {
 		String kind = rc.getResourceKind();
 		if (kind == null) return;
+		// Build 31 (issue #14): a LUN or NFS export whose list was not read
+		// this cycle is ERROR, not "collected nothing"; see
+		// SnapshotIsolation.requireListRead.
+		snap.requireListRead(kind);
 		switch (kind) {
 			case "SynologyWorld":
 				// No domain metrics on the world (v1 parity — NO_DATA_RECEIVING).
@@ -547,13 +805,21 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 		metric(out, "Network|net_rx_bytes", rxTotal);
 		metric(out, "Network|net_tx_bytes", txTotal);
-		metric(out, "Network|nic_count", (double) s.networkInterfaces.data().size());
+		// Build 31 (issue #14): a key whose optional endpoint was not read
+		// this cycle is skipped, never published as 0, "unknown" or "false".
+		if (s.isRead(SnapshotReads.NICS)) {
+			metric(out, "Network|nic_count", (double) s.networkInterfaces.data().size());
+		}
 
-		prop(out, "Fan|fan_status", fan.data().get("cool_fan").asString("unknown"));
-		prop(out, "Fan|fan_speed_mode", fan.data().get("dual_fan_speed").asString("unknown"));
+		if (s.isRead(SnapshotReads.FAN)) {
+			prop(out, "Fan|fan_status", fan.data().get("cool_fan").asString("unknown"));
+			prop(out, "Fan|fan_speed_mode", fan.data().get("dual_fan_speed").asString("unknown"));
+		}
 
-		prop(out, "NFS|nfs_enabled", nfs.data().get("enable_nfs").asBoolean() ? "true" : "false");
-		prop(out, "NFS|nfs_v4_enabled", nfs.data().get("enable_nfs_v4").asBoolean() ? "true" : "false");
+		if (s.isRead(SnapshotReads.NFS_SERVICE)) {
+			prop(out, "NFS|nfs_enabled", nfs.data().get("enable_nfs").asBoolean() ? "true" : "false");
+			prop(out, "NFS|nfs_v4_enabled", nfs.data().get("enable_nfs_v4").asBoolean() ? "true" : "false");
+		}
 
 		SimpleJson nfsUtil = util.data().get("nfs");
 		if (!nfsUtil.isNull() && nfsUtil.size() > 0) {
@@ -564,13 +830,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			metric(out, "NFS|nfs_max_latency", nfsRow.get("total_max_latency").asDouble());
 		}
 
-		int nfsClients = 0;
-		for (SimpleJson conn : s.connections.data().get("items").asList()) {
-			if ("NFS".equals(conn.get("protocol").asString())) {
-				nfsClients++;
+		if (s.isRead(SnapshotReads.CONNECTIONS)) {
+			int nfsClients = 0;
+			for (SimpleJson conn : s.connections.data().get("items").asList()) {
+				if ("NFS".equals(conn.get("protocol").asString())) {
+					nfsClients++;
+				}
 			}
+			metric(out, "NFS|nfs_client_count", (double) nfsClients);
 		}
-		metric(out, "NFS|nfs_client_count", (double) nfsClients);
 	}
 
 	private void collectStoragePool(ResourceConfig rc, Snapshot s, List<MetricData> out) {
@@ -724,8 +992,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				String.valueOf(cache.get("disk_failure_number").asLong()));
 	}
 
-	private void collectIscsiLun(ResourceConfig rc, Snapshot s, List<MetricData> out) {
+	private void collectIscsiLun(ResourceConfig rc, Snapshot s, List<MetricData> out)
+			throws IOException {
 		String uuid = getIdentifier(rc, "lun_uuid");
+		// Build 31 (issue #14): dispatchCollect has already failed this LUN
+		// when the LUN list was not read this cycle.
 		SimpleJson lun = s.findLun(uuid);
 		if (lun == null) {
 			logWarn("collect: iscsi-lun " + uuid + " absent from snapshot");
@@ -738,12 +1009,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		prop(out, "Configuration|location", lun.get("location").asString(""));
 		prop(out, "Configuration|type", lun.get("type_str").asString(""));
 
-		String iqn = s.targetIqnByName.get(name);
-		prop(out, "Configuration|target_iqn", iqn != null ? iqn : "");
-		String enabled = s.targetEnabledByName.get(name);
-		prop(out, "Configuration|target_enabled", enabled != null ? enabled : "");
-		String portals = s.targetPortalsByName.get(name);
-		prop(out, "Configuration|network_portals", portals != null ? portals : "");
+		if (s.isRead(SnapshotReads.TARGETS)) {
+			String iqn = s.targetIqnByName.get(name);
+			prop(out, "Configuration|target_iqn", iqn != null ? iqn : "");
+			String enabled = s.targetEnabledByName.get(name);
+			prop(out, "Configuration|target_enabled", enabled != null ? enabled : "");
+			String portals = s.targetPortalsByName.get(name);
+			prop(out, "Configuration|network_portals", portals != null ? portals : "");
+		}
 
 		SimpleJson io = s.lunIoByUuid.get(uuid);
 		if (io != null) {
@@ -757,8 +1030,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	}
 
-	private void collectNfsExport(ResourceConfig rc, Snapshot s, List<MetricData> out) {
+	private void collectNfsExport(ResourceConfig rc, Snapshot s, List<MetricData> out)
+			throws IOException {
 		String name = getIdentifier(rc, "share_name");
+		// Build 31 (issue #14): dispatchCollect has already failed this
+		// export when the share list was not read this cycle. Review B2: and
+		// when this share's NFS rule probe failed, it is ERROR too, never
+		// rule_count = 0 for rules that were not read.
+		s.requireNfsProbe(name);
 		SimpleJson share = s.findShare(name);
 		if (share == null) {
 			logWarn("collect: nfs-export " + name + " absent from snapshot");
@@ -796,8 +1075,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		double used = share.get("share_quota_used").asDouble();
 		metric(out, "Capacity|quota_usage_pct", quota > 0 ? (used / quota) * 100.0 : 0.0);
 
-		metric(out, "Clients|active_client_count",
-				(double) s.nfsClientsByShare.getOrDefault(name, 0));
+		if (s.isRead(SnapshotReads.CONNECTIONS)) {
+			metric(out, "Clients|active_client_count",
+					(double) s.nfsClientsByShare.getOrDefault(name, 0));
+		}
 	}
 
 	private void collectUps(ResourceConfig rc, Snapshot s, List<MetricData> out) {
@@ -820,138 +1101,53 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	private Relationships buildRelationships(Snapshot s) {
 		RelationshipBuilder rb = new RelationshipBuilder(ADAPTER_KIND);
-		SimpleJson storage = s.storage;
 
-		String serial = s.dsmInfo.data().get("serial").asString("unknown");
-		String dsModel = s.dsmInfo.data().get("model").asString("");
-		String dsName = dsModel.isEmpty() ? serial : dsModel + " " + serial;
-
-		ResourceKey world = rb.resource("SynologyWorld", "Synology World",
-				"world_id", "synology_world");
-		ResourceKey diskstation = rb.resource("SynologyDiskstation", dsName,
-				"serial", serial);
-		rb.parent(world, diskstation);
-
-		// disk id -> human name
-		Map<String, String> diskNames = new HashMap<>();
-		for (SimpleJson disk : storage.data().get("disks").asList()) {
-			diskNames.put(disk.get("id").asString(),
-					disk.get("name").asString(disk.get("id").asString()));
-		}
-
-		for (SimpleJson pool : storage.data().get("storagePools").asList()) {
-			String poolId = pool.get("id").asString();
-			String poolPath = pool.get("pool_path").asString();
-			ResourceKey poolKey = rb.resource("SynologyStoragePool",
-					poolDisplayName(pool), "pool_id", poolId);
-			rb.parent(diskstation, poolKey);
-
-			for (SimpleJson vol : storage.data().get("volumes").asList()) {
-				if (poolPath.equals(vol.get("pool_path").asString())) {
-					String volId = vol.get("volume_id").asString(vol.get("vol_path").asString());
-					rb.parent(poolKey, rb.resource("SynologyVolume",
-							volumeDisplayName(vol), "volume_id", volId));
-				}
-			}
-
-			SimpleJson poolDisks = pool.get("disks");
-			if (!poolDisks.isNull()) {
-				for (SimpleJson diskRef : poolDisks.asList()) {
-					String diskId = diskRef.asString();
-					if (diskId != null && !diskId.isEmpty()) {
-						rb.parent(poolKey, rb.resource("SynologyDisk",
-								diskNames.getOrDefault(diskId, diskId),
-								"disk_id", diskId));
-					}
-				}
-			}
-			SimpleJson cacheDiskIds = pool.get("cache_disks");
-			if (!cacheDiskIds.isNull()) {
-				for (SimpleJson diskRef : cacheDiskIds.asList()) {
-					String diskId = diskRef.asString();
-					if (diskId != null && !diskId.isEmpty()) {
-						rb.parent(poolKey, rb.resource("SynologyDisk",
-								diskNames.getOrDefault(diskId, diskId),
-								"disk_id", diskId));
-					}
-				}
-			}
-		}
-
-		// iSCSI LUN -> child of Volume (joined by location == vol_path)
-		for (SimpleJson lun : s.lunList.data().get("luns").asList()) {
-			String uuid = lun.get("uuid").asString();
-			String location = lun.get("location").asString();
-			for (SimpleJson vol : storage.data().get("volumes").asList()) {
-				if (location.equals(vol.get("vol_path").asString())) {
-					String volId = vol.get("volume_id").asString(vol.get("vol_path").asString());
-					ResourceKey volKey = rb.resource("SynologyVolume",
-							volumeDisplayName(vol), "volume_id", volId);
-					rb.parent(volKey, rb.resource("SynologyIscsiLun",
-							lun.get("name").asString(uuid), "lun_uuid", uuid));
-					break;
-				}
-			}
-		}
-
-		// NFS Export -> child of Volume (joined by vol_path)
+		// Build 31 (issue #14): own-adapter parents are full-set (the platform
+		// replaces a parent's children with what is emitted). A Volume's
+		// children come from the LUN list, the share list and the SSD caches;
+		// when the LUN or share list was not read this cycle, emitting the
+		// Volume with the children that are known would drop its other edges
+		// for the cycle. So no Volume is a parent this cycle; its existing
+		// edges are kept. Review NIT-R3: a failed NFS rule probe freezes only
+		// the Volume its share sits on; the other Volumes refresh.
+		Map<String, String> volPathByShare = new HashMap<>();
 		for (SimpleJson share : s.shares.data().get("shares").asList()) {
 			String name = share.get("name").asString();
-			SimpleJson rules = s.nfsRulesByShare.get(name);
-			if (rules == null || rules.data().get("rule").size() == 0) continue;
-			String volPath = share.get("vol_path").asString();
-			for (SimpleJson vol : storage.data().get("volumes").asList()) {
-				if (volPath.equals(vol.get("vol_path").asString())) {
-					String volId = vol.get("volume_id").asString(vol.get("vol_path").asString());
-					ResourceKey volKey = rb.resource("SynologyVolume",
-							volumeDisplayName(vol), "volume_id", volId);
-					rb.parent(volKey, rb.resource("SynologyNfsExport", name,
-							"share_name", name));
-					break;
-				}
+			if (name != null) {
+				volPathByShare.put(name, share.get("vol_path").asString());
 			}
 		}
-
-		// SSD Cache -> child of Volume; cache NVMe disks -> child of SSD Cache
-		SimpleJson ssdCaches = storage.data().get("ssdCaches");
-		if (!ssdCaches.isNull()) {
-			for (SimpleJson cache : ssdCaches.asList()) {
-				String cacheId = cache.get("id").asString();
-				String mountSpaceId = cache.get("mountSpaceId").asString("");
-				if (cacheId == null || cacheId.isEmpty() || mountSpaceId.isEmpty()) continue;
-				ResourceKey cacheKey = rb.resource("SynologySsdCache",
-						cacheDisplayName(cache, storage), "cache_id", cacheId);
-
-				for (SimpleJson vol : storage.data().get("volumes").asList()) {
-					if (mountSpaceId.equals(vol.get("id").asString(""))) {
-						String volId = vol.get("volume_id").asString(vol.get("vol_path").asString());
-						ResourceKey volKey = rb.resource("SynologyVolume",
-								volumeDisplayName(vol), "volume_id", volId);
-						rb.parent(volKey, cacheKey);
-						break;
-					}
-				}
-
-				SimpleJson cacheDisks = cache.get("disks");
-				if (!cacheDisks.isNull()) {
-					for (SimpleJson diskRef : cacheDisks.asList()) {
-						String diskId = diskRef.asString();
-						if (diskId != null && !diskId.isEmpty()) {
-							rb.parent(cacheKey, rb.resource("SynologyDisk",
-									diskNames.getOrDefault(diskId, diskId),
-									"disk_id", diskId));
-						}
-					}
-				}
-			}
+		final SnapshotIsolation.VolumeChildren volumeChildren =
+				SnapshotIsolation.volumeChildren(s.unread, s.nfsProbeFailed,
+						volPathByShare);
+		if (!volumeChildren.allKnown()) {
+			logInfo("Relationships: Volume child edges (LUN, NFS export, SSD "
+					+ "cache) left unchanged this cycle for "
+					+ (volumeChildren.noneKnown() ? "every Volume"
+							: "the Volume(s) at " + volumeChildren.frozenVolumes())
+					+ ": " + (s.unread.isEmpty() ? "" : s.unread.keySet()
+							+ " not read")
+					+ (s.nfsProbeFailed.isEmpty() ? "" : (s.unread.isEmpty()
+							? "" : ", ") + "NFS rule probe failed for share(s) "
+							+ s.nfsProbeFailed.keySet()));
 		}
 
-		// UPS -> child of Diskstation
-		if (s.ups != null && s.ups.data().get("usb_ups_connect").asBoolean()) {
-			String upsModel = s.ups.data().get("model").asString("UPS");
-			rb.parent(diskstation, rb.resource("SynologyUps", upsModel,
-					"ups_model", upsModel));
-		}
+		// Build 31 (issue #19): the internal tree is joined by
+		// SynologyTopology (SDK-free, null-safe joins, one try block per
+		// pool, LUN, export and SSD cache), so one object with a missing
+		// field costs its own edges instead of every relationship of the
+		// cycle. Same edges, order, names and identifiers as build 30.
+		SynologyTopology.Input<SimpleJson> in = new SynologyTopology.Input<>();
+		in.dsmInfo = s.dsmInfo;
+		in.storage = s.storage;
+		in.lunList = s.lunList;
+		in.shares = s.shares;
+		in.ups = s.ups;
+		in.nfsExports = s.nfsRulesByShare.keySet();
+		in.volumeChildren = volumeChildren;
+		SynologyTopology.build(SJ, in,
+				(parent, child) -> rb.parent(key(rb, parent), key(rb, child)),
+				this::logWarn, this::logInfo);
 
 		// --- Optional Datastore cross-link (build 16, v1 parity) ---
 		// Resolve real VMWARE Datastores by DataStrorePath and make each LUN /
@@ -1055,23 +1251,59 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	// Display name helpers
 	// -----------------------------------------------------------------------
 
+	// Build 31 (issue #19): one definition of each display name, shared with
+	// SynologyTopology so enumeration and relationships cannot drift.
+
 	private static String poolDisplayName(SimpleJson pool) {
-		return "Storage Pool " + pool.get("num_id").asLong();
+		return SynologyTopology.poolName(SJ, pool);
 	}
 
 	private static String volumeDisplayName(SimpleJson vol) {
-		return "Volume " + vol.get("num_id").asLong();
+		return SynologyTopology.volumeName(SJ, vol);
 	}
 
 	private static String cacheDisplayName(SimpleJson cache, SimpleJson storage) {
-		String mountSpaceId = cache.get("mountSpaceId").asString("");
-		for (SimpleJson vol : storage.data().get("volumes").asList()) {
-			if (mountSpaceId.equals(vol.get("id").asString(""))) {
-				return "SSD Cache (Volume " + vol.get("num_id").asLong() + ")";
-			}
-		}
-		return "SSD Cache";
+		return SynologyTopology.cacheName(SJ, cache, storage);
 	}
+
+	/** Build 31 (issue #19): the relationship key of a topology object. */
+	private static ResourceKey key(RelationshipBuilder rb, SynologyTopology.Obj o) {
+		return rb.resource(o.kind, o.name, o.idKey, o.id);
+	}
+
+	/** Build 31 (issue #19): {@link SynologyTopology}'s view of {@link SimpleJson}. */
+	private static final SynologyTopology.Json<SimpleJson> SJ =
+			new SynologyTopology.Json<SimpleJson>() {
+				@Override
+				public SimpleJson get(SimpleJson node, String key) {
+					return node.get(key);
+				}
+
+				@Override
+				public String str(SimpleJson node) {
+					return node.asString();
+				}
+
+				@Override
+				public long num(SimpleJson node) {
+					return node.asLong();
+				}
+
+				@Override
+				public boolean bool(SimpleJson node) {
+					return node.asBoolean();
+				}
+
+				@Override
+				public List<SimpleJson> list(SimpleJson node) {
+					return node.asList();
+				}
+
+				@Override
+				public boolean isNull(SimpleJson node) {
+					return node.isNull();
+				}
+			};
 
 	// -----------------------------------------------------------------------
 	// onDiscard
@@ -1079,13 +1311,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	@Override
 	public void onDiscard() {
-		SynologyApiClient a = this.api;
-		if (a != null) a.logout();
+		Configured c = this.configured;
 		SuiteApiStitcher s = this.suiteStitcher;
-		if (s != null) s.discard();
 		this.suiteStitcher = null;
 		this.stitcher = null;
-		this.snapshot = null;
+		this.configured = null;
+		// Build 31 (issue #21): the same teardown as a reconfigure. The HTTP
+		// client is left to super.onDiscard(), which discards and clears it.
+		releaseConfiguration("instance discarded", c, s);
 		super.onDiscard();
 	}
 
@@ -1099,7 +1332,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 * SynologyAdapter)} which logs an INFO breadcrumb of the resource counts.
 	 */
 	private static final class Snapshot {
-		final long builtAt = System.currentTimeMillis();
+		// Build 31 (issue #13): no builtAt here any more. It was a field
+		// initializer, stamped before the API calls ran; SnapshotCache now
+		// stamps the time when build() returns.
 
 		SimpleJson dsmInfo;
 		SimpleJson systemInfo;
@@ -1112,7 +1347,34 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson networkInterfaces;
 		SimpleJson connections;
 		SimpleJson shares;
-		SimpleJson ups; // nullable — UPS optional
+		SimpleJson ups; // nullable: UPS optional
+
+		/**
+		 * Build 31 (issue #14): optional endpoints not read this cycle,
+		 * endpoint to reason. Their dependent keys, objects and edges are
+		 * skipped; the field holds an empty payload.
+		 */
+		Map<String, String> unread = new java.util.LinkedHashMap<>();
+
+		boolean isRead(String endpoint) {
+			return !unread.containsKey(endpoint);
+		}
+
+		/**
+		 * Throws when {@code kind} depends on a list that was not read this
+		 * cycle; see {@link SnapshotIsolation#requireListRead}.
+		 */
+		void requireListRead(String kind) throws IOException {
+			SnapshotIsolation.requireListRead(unread, kind);
+		}
+
+		/**
+		 * Review B2: throws when this share's NFS rule probe failed this
+		 * cycle; see {@link SnapshotIsolation#requireNfsProbe}.
+		 */
+		void requireNfsProbe(String share) throws IOException {
+			SnapshotIsolation.requireNfsProbe(nfsProbeFailed, share);
+		}
 
 		// Derived lookups
 		final Map<String, SimpleJson> diskIoByDevice = new HashMap<>();
@@ -1122,22 +1384,37 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		final Map<String, String> targetEnabledByName = new HashMap<>();
 		final Map<String, String> targetPortalsByName = new HashMap<>();
 		final Map<String, SimpleJson> nfsRulesByShare = new HashMap<>();
+		/**
+		 * Review B2: shares whose NFS rule probe failed this cycle, share
+		 * name to reason. Not known to be exports or not: an existing export
+		 * on one is ERROR and Volume edges are left unchanged.
+		 */
+		final Map<String, String> nfsProbeFailed = new java.util.LinkedHashMap<>();
 		final Map<String, Integer> nfsClientsByShare = new HashMap<>();
 
-		static Snapshot build(SynologyApiClient api, SynologyAdapter adapter)
-				throws Exception {
+		static Snapshot build(SynologyApiClient api, SnapshotReads reads,
+				SynologyAdapter adapter) throws Exception {
 			Snapshot s = new Snapshot();
-			s.dsmInfo = api.dsmInfo();
-			s.systemInfo = api.systemInfo();
-			s.utilization = api.utilization();
-			s.fanSpeed = api.fanSpeed();
-			s.nfsService = api.nfsServiceGet();
-			s.storage = api.storageLoadInfo();
-			s.lunList = api.iscsiLunList();
-			s.targets = api.iscsiTargetList();
-			s.networkInterfaces = api.networkInterfaceList();
-			s.connections = api.currentConnections();
-			s.shares = api.shareList();
+			// Build 31: SnapshotReads logs in if needed and runs the abort
+			// checkpoint before the login (review NIT-3) and before each DSM
+			// call (issue #13), and fails the build only on the four required
+			// endpoints (issue #14); an optional endpoint not read holds an
+			// empty payload and is listed in s.unread.
+			SnapshotReads.Result<SimpleJson> r = reads.read(api,
+					SimpleJson.parse("{}"), adapter::checkpoint,
+					adapter::logWarn, adapter::logInfo);
+			s.dsmInfo = r.dsmInfo;
+			s.systemInfo = r.systemInfo;
+			s.utilization = r.utilization;
+			s.fanSpeed = r.fanSpeed;
+			s.nfsService = r.nfsService;
+			s.storage = r.storage;
+			s.lunList = r.lunList;
+			s.targets = r.targets;
+			s.networkInterfaces = r.networkInterfaces;
+			s.connections = r.connections;
+			s.shares = r.shares;
+			s.unread = r.unread;
 
 			// NIT-1 (build-15): contract-assert one required field on the two
 			// critical endpoints that drive the diskstation singleton's metrics.
@@ -1158,12 +1435,22 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 						+ "sentinel metrics published)");
 			}
 
+			adapter.checkpoint("Core.ExternalDevice.UPS");
 			try {
 				SimpleJson ups = api.upsGet();
 				if (ups.data().get("usb_ups_connect").asBoolean()) {
 					s.ups = ups;
 				}
+			} catch (InterruptedException ie) {
+				throw ie;
 			} catch (Exception e) {
+				// Build 31 (issues #12, #13, review NIT-4): a refused re-login,
+				// or a NAS that stopped accepting connections or answering,
+				// fails the build, as for every other optional endpoint
+				// (SynologyFailures.endsBuild).
+				if (SynologyFailures.endsBuild(e)) {
+					throw e;
+				}
 				adapter.logInfo("Snapshot: UPS not available: " + e.getMessage());
 			}
 
@@ -1179,7 +1466,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					+ volCount + " volumes / " + diskCount + " disks / "
 					+ cacheCount + " ssd-caches / " + lunCount + " luns / "
 					+ s.nfsRulesByShare.size() + " nfs-exports / ups="
-					+ (s.ups != null));
+					+ (s.ups != null)
+					+ (s.nfsProbeFailed.isEmpty() ? "" : " / nfs probe failed: "
+							+ s.nfsProbeFailed.keySet())
+					+ (s.unread.isEmpty() ? "" : " / not read: " + s.unread.keySet()));
 			if (diskCount == 0) {
 				adapter.logWarn("Synology API snapshot: 0 disks returned from "
 						+ "storage load_info — expected a populated DiskStation");
@@ -1187,7 +1477,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			return s;
 		}
 
-		private void buildLookups(SynologyApiClient api, SynologyAdapter adapter) {
+		private void buildLookups(SynologyApiClient api, SynologyAdapter adapter)
+				throws Exception {
 			SimpleJson diskUtil = utilization.data().get("disk");
 			if (!diskUtil.isNull()) {
 				for (SimpleJson d : diskUtil.get("disk").asList()) {
@@ -1221,20 +1512,21 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				}
 				targetPortalsByName.put(tName, portals.toString());
 			}
-			// NFS rule probe per share (identifies a share as an NFS export);
-			// a probe failure skips that share rather than faking an export.
+			// NFS rule probe per share (identifies a share as an NFS export).
+			// A probe failure never fakes an export or its absence: the share
+			// is recorded in nfsProbeFailed (review B2), so an existing export
+			// on it is ERROR and Volume edges are left unchanged this cycle.
+			// See NfsProbes.
+			List<String> shareNames = new ArrayList<>();
 			for (SimpleJson share : shares.data().get("shares").asList()) {
-				String name = share.get("name").asString();
-				try {
-					SimpleJson rules = api.nfsSharePrivilege(name);
-					if (rules.data().get("rule").size() > 0) {
-						nfsRulesByShare.put(name, rules);
-					}
-				} catch (Exception e) {
-					adapter.logWarn("Snapshot: NFS rule probe failed for share "
-							+ name + ": " + e.getMessage());
-				}
+				shareNames.add(share.get("name").asString());
 			}
+			NfsProbes.Result<SimpleJson> probes = NfsProbes.run(shareNames,
+					api::nfsSharePrivilege,
+					rules -> rules.data().get("rule").size(),
+					adapter::checkpoint, adapter::logWarn);
+			nfsRulesByShare.putAll(probes.rulesByShare);
+			nfsProbeFailed.putAll(probes.failed);
 			for (SimpleJson conn : connections.data().get("items").asList()) {
 				if ("NFS".equals(conn.get("protocol").asString())) {
 					String descr = conn.get("descr").asString("");
@@ -1247,22 +1539,24 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 		SimpleJson findPool(String poolId) {
 			for (SimpleJson p : storage.data().get("storagePools").asList()) {
-				if (p.get("id").asString().equals(poolId)) return p;
+				// Build 31 (issue #19): constant first, a pool without id never matches.
+				if (poolId != null && poolId.equals(p.get("id").asString())) return p;
 			}
 			return null;
 		}
 
 		SimpleJson findVolume(String volId) {
 			for (SimpleJson v : storage.data().get("volumes").asList()) {
-				String id = v.get("volume_id").asString(v.get("vol_path").asString());
-				if (id.equals(volId)) return v;
+				// Build 31 (issue #19): a volume with neither volume_id nor
+				// vol_path has no identity and never matches.
+				if (volId != null && volId.equals(SynologyTopology.volumeId(SJ, v))) return v;
 			}
 			return null;
 		}
 
 		SimpleJson findDisk(String diskId) {
 			for (SimpleJson d : storage.data().get("disks").asList()) {
-				if (d.get("id").asString().equals(diskId)) return d;
+				if (diskId != null && diskId.equals(d.get("id").asString())) return d;
 			}
 			return null;
 		}
@@ -1271,21 +1565,21 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			SimpleJson caches = storage.data().get("ssdCaches");
 			if (caches.isNull()) return null;
 			for (SimpleJson c : caches.asList()) {
-				if (c.get("id").asString().equals(cacheId)) return c;
+				if (cacheId != null && cacheId.equals(c.get("id").asString())) return c;
 			}
 			return null;
 		}
 
 		SimpleJson findLun(String uuid) {
 			for (SimpleJson l : lunList.data().get("luns").asList()) {
-				if (l.get("uuid").asString().equals(uuid)) return l;
+				if (uuid != null && uuid.equals(l.get("uuid").asString())) return l;
 			}
 			return null;
 		}
 
 		SimpleJson findShare(String name) {
 			for (SimpleJson sh : shares.data().get("shares").asList()) {
-				if (sh.get("name").asString().equals(name)) return sh;
+				if (name != null && name.equals(sh.get("name").asString())) return sh;
 			}
 			return null;
 		}

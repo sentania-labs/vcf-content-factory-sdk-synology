@@ -46,7 +46,7 @@ After installation, create an adapter instance:
 3. Fill in:
    - **Host / IP Address**: Your NAS hostname or IP (e.g., `storage.example.com`)
    - **Port**: HTTPS port (default `5001`)
-   - **Allow Insecure SSL**: `true` if using self-signed certificates
+   - **Allow Insecure SSL**: default `false` (the NAS certificate is validated). `true` turns validation off (lab use only); any other value validates. A self-signed NAS does not need it: Validate Connection offers its certificate for review, you accept it once and validation stays on. Enter the NAS by a name its certificate carries; when it is entered by an IP address the certificate does not list, the review dialog is unproven and Allow Insecure SSL may be the only path. Existing instances keep their stored value on upgrade; see [docs/installing.md](docs/installing.md).
    - **Username**: DSM admin account
    - **Password**: Account password
 4. Click **Test Connection**, then **Save**

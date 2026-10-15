@@ -26,27 +26,57 @@ import java.net.http.HttpResponse;
  * auth strategies. This is a framework gap: a QueryParamAuth strategy
  * should be added for APIs that authenticate via query parameters.
  */
-public final class SynologyApiClient {
+public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson> {
 
 	private static final String SESSION_NAME = "VCFContentFactory";
 
 	private final ManagedHttpClient http;
+	/**
+	 * Build 31 (review W5): the client the logout goes over. For a collect
+	 * configuration a single-attempt client with a short timeout, so
+	 * releasing an old configuration whose NAS is gone does not hold
+	 * configure or discard for three 30 s attempts; the tester uses its own
+	 * client for both.
+	 */
+	private final ManagedHttpClient logoutHttp;
 	private final String username;
 	private final String password;
 	private final Logger log;
-	private volatile String sid;
+	/** Build 31 (review W5): session id and closed flag; see {@link DsmSession}. */
+	private final DsmSession session;
 
 	public SynologyApiClient(ManagedHttpClient http, String username,
 			String password, Logger log) {
+		this(http, http, username, password, log);
+	}
+
+	public SynologyApiClient(ManagedHttpClient http, ManagedHttpClient logoutHttp,
+			String username, String password, Logger log) {
 		this.http = http;
+		this.logoutHttp = logoutHttp;
 		this.username = username;
 		this.password = password;
 		this.log = log;
+		// Codex P2: a dedicated logout client is discarded on close (after
+		// the logout attempt, with or without a session). When it is the
+		// main client (the tester), the main client is not ours to discard.
+		this.session = new DsmSession(this::sendLogin, this::sendLogout,
+				logoutHttp != null && logoutHttp != http
+						? logoutHttp::discard : null);
 	}
 
 	// --- Session management ---
 
+	/**
+	 * Logs in. Build 31 (review W5): throws
+	 * {@link SynologyClientClosedException} without contacting the NAS once
+	 * {@link #close} was called.
+	 */
 	public String login() throws IOException, InterruptedException {
+		return session.login();
+	}
+
+	private String sendLogin() throws IOException, InterruptedException {
 		String path = synoUrl("SYNO.API.Auth", 7, "login",
 				"account=" + urlEncode(username),
 				"passwd=" + urlEncode(password),
@@ -55,32 +85,56 @@ public final class SynologyApiClient {
 		SimpleJson resp = callRaw(path, "SYNO.API.Auth login");
 		if (!resp.isSuccess()) {
 			int code = (int) resp.get("error").get("code").asLong();
-			throw new IOException("Synology login failed: error code " + code);
+			// Build 31 (issue #12): typed, so an authentication-class refusal
+			// (DSM error code in the body of a 200) is recognized by code, not
+			// by message text, and is never retried within the cycle. No
+			// account, password or session id in the message.
+			String meaning = SynologyFailures.loginCodeMeaning(code);
+			throw new SynologyDsmException("Synology login failed: error code "
+					+ code + (meaning.isEmpty() ? "" : " (" + meaning + ")"),
+					code, true);
 		}
-		this.sid = resp.data().get("sid").asString();
+		String sid = resp.data().get("sid").asString();
 		log.info("Synology login succeeded, session=" + SESSION_NAME);
-		return this.sid;
+		return sid;
 	}
 
+	/** Logs the session out (if any); the client stays usable. */
 	public void logout() {
-		if (sid == null) return;
+		session.logout();
+	}
+
+	/**
+	 * Build 31 (review W5): closes the client for good (no login after
+	 * this, so a cycle still running on it cannot re-login), then logs the
+	 * session out over {@link #logoutHttp}, best effort, then discards
+	 * {@link #logoutHttp} when it is a dedicated client (Codex P2), with or
+	 * without a session and even when the logout failed. Never throws.
+	 */
+	public void close() {
+		session.close();
+	}
+
+	private void sendLogout(String sid) {
 		try {
-			callRaw(synoUrl("SYNO.API.Auth", 7, "logout",
+			callRaw(logoutHttp, synoUrl(sid, "SYNO.API.Auth", 7, "logout",
 					"session=" + SESSION_NAME), "SYNO.API.Auth logout");
+		} catch (InterruptedException ie) {
+			Thread.currentThread().interrupt();
+			log.warn("Logout interrupted (non-fatal)");
 		} catch (Exception e) {
 			// e.getMessage() may carry the request URL (with _sid) if the
 			// underlying transport embeds it; redact before it reaches the log.
 			log.warn("Logout failed (non-fatal): " + redact(String.valueOf(e.getMessage())));
 		}
-		sid = null;
 	}
 
 	public void ensureSession() throws IOException, InterruptedException {
-		if (sid == null) login();
+		session.ensure();
 	}
 
 	public void invalidateSession() {
-		sid = null;
+		session.invalidate();
 	}
 
 	// --- API calls (each returns parsed JSON) ---
@@ -175,7 +229,13 @@ public final class SynologyApiClient {
 				resp = callRaw(synoUrl(api, version, method, extra), endpoint);
 			}
 			if (!resp.isSuccess()) {
-				throw new IOException(api + " " + method + " failed: " + resp.asString());
+				// Build 31 (review W4): typed with the data API's DSM error
+				// code (login=false, so it never counts as a login refusal),
+				// so SnapshotReads can tell "this API does not exist on this
+				// NAS" (102) from any other failure. Same message as before.
+				throw new SynologyDsmException(api + " " + method + " failed: "
+						+ resp.asString(),
+						(int) resp.get("error").get("code").asLong(), false);
 			}
 		}
 		return resp;
@@ -194,9 +254,14 @@ public final class SynologyApiClient {
 	 */
 	private SimpleJson callRaw(String path, String endpoint)
 			throws IOException, InterruptedException {
+		return callRaw(http, path, endpoint);
+	}
+
+	private SimpleJson callRaw(ManagedHttpClient via, String path,
+			String endpoint) throws IOException, InterruptedException {
 		HttpResponse<String> resp;
 		try {
-			resp = http.get(path, HttpResponse.BodyHandlers.ofString());
+			resp = via.get(path, HttpResponse.BodyHandlers.ofString());
 		} catch (IOException e) {
 			// DEF-001: a transport failure (connect/SSL/timeout) can throw BEFORE
 			// any response, and the underlying message may embed the request URI —
@@ -205,8 +270,12 @@ public final class SynologyApiClient {
 			// from the endpoint label only; redact any message text and DO NOT chain
 			// the raw cause (a chained cause re-exposes getCause().getMessage() to
 			// the framework logger). See rules/no-secrets-on-disk.md.
-			throw new IOException("transport error calling " + endpoint + ": "
-					+ redact(String.valueOf(e.getMessage())));
+			// Build 31 (issue #13): keep the failure's class (connect, timeout,
+			// other) as a field instead, so an unreachable NAS maps to DOWN and
+			// a connect failure stops the snapshot build.
+			throw new SynologyTransportException("transport error calling "
+					+ endpoint + ": " + redact(String.valueOf(e.getMessage())),
+					SynologyFailures.classifyTransport(e));
 		}
 		if (resp.statusCode() != 200) {
 			throw new IOException("HTTP " + resp.statusCode() + " from " + endpoint);
@@ -232,6 +301,11 @@ public final class SynologyApiClient {
 	}
 
 	private String synoUrl(String api, int version, String method, String... extra) {
+		return synoUrl(session.sid(), api, version, method, extra);
+	}
+
+	private static String synoUrl(String sid, String api, int version,
+			String method, String... extra) {
 		StringBuilder sb = new StringBuilder("/webapi/entry.cgi?api=");
 		sb.append(api).append("&version=").append(version).append("&method=").append(method);
 		if (sid != null) {

@@ -1,6 +1,5 @@
 package com.vcfcf.adapters.synology;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -111,7 +110,12 @@ public final class SnapshotCacheTest {
 			T.check(e instanceof SnapshotCache.CachedFailureException,
 					"resource " + i + " fails from the cache");
 			T.eq(400, SynologyFailures.authCode(e),
-					"the cached failure keeps its DSM 400 in the cause chain");
+					"the cached failure carries its DSM 400");
+			T.eq(null, e.getCause(), "no cause chain on the cached copy");
+			T.eq(0, e.getStackTrace().length,
+					"no stack trace on the cached copy");
+			T.check(!SynologyFailures.isUnreachable(e),
+					"a cached 400 is ERROR, not DOWN");
 			T.check(e.getMessage().contains("error code 400"),
 					"the cached message says why: " + e.getMessage());
 		}
@@ -262,8 +266,10 @@ public final class SnapshotCacheTest {
 		SnapshotCache.Builder<String> unreachable = () -> {
 			attempts[0]++;
 			clock.now += 93_000L; // three 30 s timeouts plus back-off
-			throw new IOException("transport error calling SYNO.API.Auth "
-					+ "login: Connection refused");
+			// What SynologyApiClient.callRaw throws for a refused connect.
+			throw new SynologyTransportException("transport error calling "
+					+ "SYNO.API.Auth login: Connection refused",
+					SynologyFailures.Transport.CONNECT);
 		};
 		c.beginCycle();
 		for (int i = 0; i < RESOURCES; i++) {
@@ -274,6 +280,18 @@ public final class SnapshotCacheTest {
 			}
 		}
 		T.eq(1, attempts[0], "one attempt for the whole cycle");
+		try {
+			c.get(unreachable, warns::add);
+			throw new AssertionError("cached failure expected");
+		} catch (SnapshotCache.CachedFailureException e) {
+			T.check(SynologyFailures.isUnreachable(e),
+					"the cached copy of an unreachable failure is DOWN");
+			T.eq(null, e.getCause(), "no cause chain on the cached copy");
+			T.check(e.getMessage().contains("Connection refused"),
+					"the message names the original: " + e.getMessage());
+		} catch (Exception e) {
+			throw new AssertionError("wrong failure " + e);
+		}
 		T.eq(1, warns.size(), "one WARN");
 		clock.now += 5 * MIN;
 		c.beginCycle();

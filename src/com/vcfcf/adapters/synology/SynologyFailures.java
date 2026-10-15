@@ -8,9 +8,10 @@ import java.util.Set;
  * Build 31: how a failed DSM read is classified. No VCF Ops SDK and no
  * framework-jar dependency, so the plain-main tests exercise it directly.
  *
- * <p>Every check walks the cause chain (cycle safe): the snapshot cache
- * wraps a cached failure, so the meaningful exception is rarely the
- * outermost one.
+ * <p>Every check walks the cause chain (cycle safe), so a wrapped failure
+ * (the NFS probe stop, for example) is still recognized. A
+ * {@link SnapshotCache.CachedFailureException} has no cause; it carries the
+ * original failure's classification as fields, and those answer for it.
  */
 final class SynologyFailures {
 
@@ -32,6 +33,9 @@ final class SynologyFailures {
 	static int authCode(Throwable t) {
 		Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
 		for (Throwable c = t; c != null && seen.add(c); c = c.getCause()) {
+			if (c instanceof SnapshotCache.CachedFailureException) {
+				return ((SnapshotCache.CachedFailureException) c).authCode();
+			}
 			if (c instanceof SynologyDsmException) {
 				SynologyDsmException d = (SynologyDsmException) c;
 				if (d.isLogin() && isAuthCode(d.code())) {
@@ -56,6 +60,9 @@ final class SynologyFailures {
 		if (authCode(t) != 0) return false;
 		Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
 		for (Throwable c = t; c != null && seen.add(c); c = c.getCause()) {
+			if (c instanceof SnapshotCache.CachedFailureException) {
+				return ((SnapshotCache.CachedFailureException) c).unreachable();
+			}
 			Transport k = (c instanceof SynologyTransportException)
 					? ((SynologyTransportException) c).kind()
 					: classifyOne(c);

@@ -83,9 +83,14 @@ public final class FailureMappingTest {
 
 	/** The old check saw only a bare ConnectException, which never arrived. */
 	static void wrappedUnreachableIsDown() {
+		// The cached failure the other resources of the cycle get: no cause
+		// chain (review W3), the classification is carried as a field.
 		Throwable cached = new SnapshotCache.CachedFailureException("cached",
-				asClientThrows(new UnknownHostException("nas")));
+				0, true);
 		T.check(SynologyFailures.isUnreachable(cached), "cached failure is DOWN");
+		T.check(!SynologyFailures.isUnreachable(
+				new SnapshotCache.CachedFailureException("cached", 0, false)),
+				"a cached failure that was not unreachable is ERROR");
 		Throwable probe = new IOException("NFS rule probe for share x could "
 				+ "not connect to the NAS",
 				asClientThrows(new ConnectException("refused")));
@@ -98,9 +103,11 @@ public final class FailureMappingTest {
 				"Synology login failed: error code 400", 400, true)),
 				"wrong password is ERROR");
 		T.check(!SynologyFailures.isUnreachable(new SnapshotCache
-				.CachedFailureException("cached", new SynologyDsmException(
-						"Synology login failed: error code 400", 400, true))),
+				.CachedFailureException("cached", 400, false)),
 				"cached wrong password is ERROR");
+		T.check(!SynologyFailures.isUnreachable(new SnapshotCache
+				.CachedFailureException("cached", 400, true)),
+				"a cached login refusal is never DOWN");
 		T.check(!SynologyFailures.isUnreachable(new IOException(
 				"HTTP 502 from SYNO.DSM.Info getinfo")), "HTTP 502 is ERROR");
 		T.check(!SynologyFailures.isUnreachable(new IOException("DSM.Info "

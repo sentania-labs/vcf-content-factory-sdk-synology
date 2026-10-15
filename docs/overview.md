@@ -149,6 +149,11 @@ normally — collection is never failed over the optional cross-link.
   DSM session out and discards the previous Suite API stitcher and HTTP
   client, best effort, using the same teardown as removing the instance.
   Before build 31 every edit left a DSM session open until DSM expired it.
+  The old DSM client is closed first: a collection still running on it
+  never logs in again (no leftover session, and no login with an old
+  password counting toward DSM Auto Block), and its logout is one attempt
+  with a 5 s timeout, so an edit made because the old address is dead is
+  not held up.
 
 - **One oddly shaped object no longer wipes the topology (build 31).** A
   storage pool without `pool_path`, an iSCSI LUN without `location` (a

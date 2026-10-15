@@ -31,22 +31,47 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	private static final String SESSION_NAME = "VCFContentFactory";
 
 	private final ManagedHttpClient http;
+	/**
+	 * Build 31 (review W5): the client the logout goes over. For a collect
+	 * configuration a single-attempt client with a short timeout, so
+	 * releasing an old configuration whose NAS is gone does not hold
+	 * configure or discard for three 30 s attempts; the tester uses its own
+	 * client for both.
+	 */
+	private final ManagedHttpClient logoutHttp;
 	private final String username;
 	private final String password;
 	private final Logger log;
-	private volatile String sid;
+	/** Build 31 (review W5): session id and closed flag; see {@link DsmSession}. */
+	private final DsmSession session;
 
 	public SynologyApiClient(ManagedHttpClient http, String username,
 			String password, Logger log) {
+		this(http, http, username, password, log);
+	}
+
+	public SynologyApiClient(ManagedHttpClient http, ManagedHttpClient logoutHttp,
+			String username, String password, Logger log) {
 		this.http = http;
+		this.logoutHttp = logoutHttp;
 		this.username = username;
 		this.password = password;
 		this.log = log;
+		this.session = new DsmSession(this::sendLogin, this::sendLogout);
 	}
 
 	// --- Session management ---
 
+	/**
+	 * Logs in. Build 31 (review W5): throws
+	 * {@link SynologyClientClosedException} without contacting the NAS once
+	 * {@link #close} was called.
+	 */
 	public String login() throws IOException, InterruptedException {
+		return session.login();
+	}
+
+	private String sendLogin() throws IOException, InterruptedException {
 		String path = synoUrl("SYNO.API.Auth", 7, "login",
 				"account=" + urlEncode(username),
 				"passwd=" + urlEncode(password),
@@ -64,30 +89,45 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 					+ code + (meaning.isEmpty() ? "" : " (" + meaning + ")"),
 					code, true);
 		}
-		this.sid = resp.data().get("sid").asString();
+		String sid = resp.data().get("sid").asString();
 		log.info("Synology login succeeded, session=" + SESSION_NAME);
-		return this.sid;
+		return sid;
 	}
 
+	/** Logs the session out (if any); the client stays usable. */
 	public void logout() {
-		if (sid == null) return;
+		session.logout();
+	}
+
+	/**
+	 * Build 31 (review W5): closes the client for good (no login after
+	 * this, so a cycle still running on it cannot re-login), then logs the
+	 * session out over {@link #logoutHttp}, best effort. Never throws.
+	 */
+	public void close() {
+		session.close();
+	}
+
+	private void sendLogout(String sid) {
 		try {
-			callRaw(synoUrl("SYNO.API.Auth", 7, "logout",
+			callRaw(logoutHttp, synoUrl(sid, "SYNO.API.Auth", 7, "logout",
 					"session=" + SESSION_NAME), "SYNO.API.Auth logout");
+		} catch (InterruptedException ie) {
+			Thread.currentThread().interrupt();
+			log.warn("Logout interrupted (non-fatal)");
 		} catch (Exception e) {
 			// e.getMessage() may carry the request URL (with _sid) if the
 			// underlying transport embeds it; redact before it reaches the log.
 			log.warn("Logout failed (non-fatal): " + redact(String.valueOf(e.getMessage())));
 		}
-		sid = null;
 	}
 
 	public void ensureSession() throws IOException, InterruptedException {
-		if (sid == null) login();
+		session.ensure();
 	}
 
 	public void invalidateSession() {
-		sid = null;
+		session.invalidate();
 	}
 
 	// --- API calls (each returns parsed JSON) ---
@@ -207,9 +247,14 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	 */
 	private SimpleJson callRaw(String path, String endpoint)
 			throws IOException, InterruptedException {
+		return callRaw(http, path, endpoint);
+	}
+
+	private SimpleJson callRaw(ManagedHttpClient via, String path,
+			String endpoint) throws IOException, InterruptedException {
 		HttpResponse<String> resp;
 		try {
-			resp = http.get(path, HttpResponse.BodyHandlers.ofString());
+			resp = via.get(path, HttpResponse.BodyHandlers.ofString());
 		} catch (IOException e) {
 			// DEF-001: a transport failure (connect/SSL/timeout) can throw BEFORE
 			// any response, and the underlying message may embed the request URI —
@@ -249,6 +294,11 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	}
 
 	private String synoUrl(String api, int version, String method, String... extra) {
+		return synoUrl(session.sid(), api, version, method, extra);
+	}
+
+	private static String synoUrl(String sid, String api, int version,
+			String method, String... extra) {
 		StringBuilder sb = new StringBuilder("/webapi/entry.cgi?api=");
 		sb.append(api).append("&version=").append(version).append("&method=").append(method);
 		if (sid != null) {

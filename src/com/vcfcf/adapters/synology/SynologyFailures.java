@@ -106,7 +106,20 @@ final class SynologyFailures {
 	 * answered the required reads and then hung could outlast the cycle).
 	 */
 	static boolean endsBuild(Throwable t) {
-		return authCode(t) != 0 || isUnreachable(t);
+		return authCode(t) != 0 || isUnreachable(t) || isClosed(t);
+	}
+
+	/**
+	 * Review W5: the API client was closed (its configuration was replaced
+	 * or discarded) and refused to log in again. Every further call would
+	 * be refused the same way, so it ends the build. ERROR, not DOWN.
+	 */
+	static boolean isClosed(Throwable t) {
+		Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+		for (Throwable c = t; c != null && seen.add(c); c = c.getCause()) {
+			if (c instanceof SynologyClientClosedException) return true;
+		}
+		return false;
 	}
 
 	/** Issue #13: how a transport failure (no DSM answer) is classed. */

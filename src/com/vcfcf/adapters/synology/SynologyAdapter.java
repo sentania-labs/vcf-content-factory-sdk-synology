@@ -138,6 +138,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	private static final long MAX_AUTH_FAILURE_BACKOFF_MS = 60L * 60_000L;
 
 	/**
+	 * Build 31 (review W5): the connect and read timeout of the DSM logout
+	 * sent when a configuration is released (instance edited or removed),
+	 * in one attempt. A logout that times out leaves an idle session for
+	 * DSM to expire; before, an unreachable old NAS held configure (or
+	 * discard) for three 30 s attempts.
+	 */
+	private static final Duration LOGOUT_TIMEOUT = Duration.ofSeconds(5);
+
+	/**
 	 * One configuration's DSM API client, snapshot cache and optional-endpoint
 	 * WARN state (build 31, issue #14) (immutable).
 	 */
@@ -189,7 +198,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		this.config = cfg;
 		this.httpClient = buildHttpClient(cfg);
 		this.configured = new Configured(
-				new SynologyApiClient(httpClient, cfg.username, cfg.password,
+				// Build 31 (review W5): the logout goes over its own
+				// single-attempt client with a short timeout (same TLS
+				// settings), so releasing this configuration later is bounded.
+				new SynologyApiClient(httpClient,
+						buildHttpClient(cfg, 1, LOGOUT_TIMEOUT),
+						cfg.username, cfg.password,
 						componentLogger(SynologyApiClient.class)),
 				new SnapshotCache<>(System::currentTimeMillis,
 						MAX_SNAPSHOT_AGE_MS, FAILURE_RETRY_BACKOFF_MS,
@@ -276,17 +290,19 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	/**
 	 * Build 31 (issue #21): the teardown shared by {@link #configureAdapter}
-	 * (for the configuration it replaces) and {@link #onDiscard}. Logs the
-	 * DSM session out first (it is sent over {@code http}), then discards
-	 * the Suite API stitcher and the HTTP client. Best effort: every step
-	 * runs, a failure is one WARN, nothing is thrown. Null arguments are
-	 * skipped. {@code ManagedHttpClient} has no close; {@code discard()} is
-	 * its release.
+	 * (for the configuration it replaces) and {@link #onDiscard}. Closes the
+	 * old DSM API client first (review W5: marked closed so a cycle still
+	 * running on it never logs in again, then its session is logged out in
+	 * one attempt bounded by {@link #LOGOUT_TIMEOUT}), then discards the
+	 * Suite API stitcher and the HTTP client. Best effort: every step runs,
+	 * a failure is one WARN, nothing is thrown. Null arguments are skipped.
+	 * {@code ManagedHttpClient} has no close; {@code discard()} is its
+	 * release.
 	 */
 	private void releaseConfiguration(String why, Configured c,
 			SuiteApiStitcher st, ManagedHttpClient http) {
 		Teardown.run(why, this::logWarn,
-				Teardown.step("DSM logout", c == null ? null : c.api::logout),
+				Teardown.step("DSM logout", c == null ? null : c.api::close),
 				Teardown.step("Suite API stitcher discard",
 						st == null ? null : st::discard),
 				Teardown.step("HTTP client discard",
@@ -317,13 +333,23 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 * resources fail from the cached result.
 	 */
 	private ManagedHttpClient buildHttpClient(SynologyConfig cfg) {
+		return buildHttpClient(cfg, 3, Duration.ofSeconds(30));
+	}
+
+	/**
+	 * Build 31 (review W5): the same client with a given attempt count and
+	 * timeout (the bounded logout client uses one attempt and
+	 * {@link #LOGOUT_TIMEOUT}).
+	 */
+	private ManagedHttpClient buildHttpClient(SynologyConfig cfg,
+			int attempts, Duration timeout) {
 		HttpClientBuilder b = HttpClientBuilder.builder()
 				.baseUrl(cfg.baseUrl())
 				.retryPolicy(RetryPolicy.builder()
-						.maxAttempts(3)
+						.maxAttempts(attempts)
 						.baseDelayMs(1000)
 						.build())
-				.timeout(Duration.ofSeconds(30));
+				.timeout(timeout);
 		if (cfg.allowInsecure) {
 			// Lab opt-out: Synology DSM ships a self-signed cert by default.
 			// Build 31 (issue #15): only an explicit "true" gets here.

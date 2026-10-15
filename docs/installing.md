@@ -64,9 +64,15 @@ temporary failure does not detach them.
 
 A NAS without iSCSI (SAN Manager not installed) answers the iSCSI LUN and
 target lists with DSM error 102 (the API does not exist). The adapter
-reads that as "no LUNs, no targets", logs one INFO per instance
+reads that as "no LUNs, no targets" once two consecutive collection
+cycles get 102 from the same list, logs one INFO per instance
 configuration, and keeps refreshing Volume relationships, so SSD caches
-and NFS exports still attach to their Volume.
+and NFS exports still attach to their Volume. The first 102 is treated as
+not read (existing LUNs go ERROR for that cycle and Volume relationships
+are left unchanged), because DSM can answer 102 for a moment while SAN
+Manager is still starting after a NAS reboot. Any other answer resets the
+count. On a NAS without iSCSI this costs one cycle after the instance is
+created or edited.
 
 The case that stays frozen is a permanent refusal: an account without the
 privilege to read the LUN list or the share list (DSM error 105, for

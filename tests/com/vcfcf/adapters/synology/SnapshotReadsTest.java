@@ -75,6 +75,7 @@ public final class SnapshotReadsTest {
 		loginRefusalAndConnectFailureStillFailTheBuild();
 		checkpointRunsBeforeEveryCall();
 		iscsiNotInstalledIsAnEmptyRead();
+		transient102IsUnreadUntilConfirmed();
 		System.out.println("SnapshotReadsTest: all assertions passed");
 	}
 
@@ -247,7 +248,8 @@ public final class SnapshotReadsTest {
 	 * Review W4: a NAS without iSCSI answers DSM error 102 (the API does
 	 * not exist). That is "no LUNs, no targets", a read, so Volume
 	 * relationships keep refreshing (SSD caches and NFS exports attach to
-	 * their Volume) instead of freezing forever.
+	 * their Volume) instead of freezing forever. Review NIT-R1: only from
+	 * the second consecutive 102; the first is unread.
 	 */
 	static void iscsiNotInstalledIsAnEmptyRead() throws Exception {
 		SnapshotReads reads = new SnapshotReads(); // one configuration
@@ -256,9 +258,15 @@ public final class SnapshotReadsTest {
 		nas.failing.put(SnapshotReads.TARGETS, dsm(SnapshotReads.TARGETS, 102));
 		List<String> warns = new ArrayList<>();
 		List<String> infos = new ArrayList<>();
+		SnapshotReads.Result<String> f = read(reads, nas, warns, infos,
+				new ArrayList<>());
+		T.eq(new HashSet<>(Arrays.asList(SnapshotReads.LUNS,
+				SnapshotReads.TARGETS)), f.unread.keySet(),
+				"the first 102 is unread: " + f.unread);
+		T.eq(0, warns.size() + infos.size(), "and logs nothing of its own");
 		SnapshotReads.Result<String> r = read(reads, nas, warns, infos,
 				new ArrayList<>());
-		T.check(r.unread.isEmpty(), "102 is not unread: " + r.unread);
+		T.check(r.unread.isEmpty(), "the second 102 is not unread: " + r.unread);
 		T.eq(EMPTY, r.lunList, "the LUN list is the empty list");
 		T.eq(EMPTY, r.targets, "the target list is the empty list");
 		T.check(SnapshotIsolation.volumeChildrenKnown(r.unread,
@@ -302,14 +310,97 @@ public final class SnapshotReadsTest {
 				new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
 		T.check(!l.isRead(SnapshotReads.LUNS), "a login 102 is unread");
 
-		// Installed later: read normally, and a new 102 is logged again.
+		// Installed later: read normally, and a new 102 is logged again
+		// once it is confirmed by a second one.
 		nas.failing.clear();
 		SnapshotReads.Result<String> after = read(reads, nas, warns, infos,
 				new ArrayList<>());
 		T.eq(SnapshotReads.LUNS, after.lunList, "read once it exists");
 		nas.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 102));
+		T.check(!read(reads, nas, warns, infos, new ArrayList<>())
+				.isRead(SnapshotReads.LUNS), "a first 102 after it existed is unread");
+		T.eq(2, infos.size(), "not logged yet");
 		read(reads, nas, warns, infos, new ArrayList<>());
-		T.eq(3, infos.size(), "a new 102 after it existed is logged again");
+		T.eq(3, infos.size(), "a confirmed 102 after it existed is logged again");
+	}
+
+	/**
+	 * Review NIT-R1: a transient 102 (SAN Manager still starting after a
+	 * NAS reboot) never reads as "no LUNs": the existing LUNs are ERROR for
+	 * the cycle and Volume edges are kept, and the run of 102s resets on
+	 * a successful read and on any other failure.
+	 */
+	static void transient102IsUnreadUntilConfirmed() throws Exception {
+		SnapshotReads reads = new SnapshotReads(); // one configuration
+		FakeNas nas = new FakeNas();
+		List<String> warns = new ArrayList<>();
+		List<String> infos = new ArrayList<>();
+		read(reads, nas, warns, infos, new ArrayList<>()); // LUNs present
+
+		// Reboot: one 102, then SAN Manager is up again.
+		nas.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 102));
+		SnapshotReads.Result<String> r = read(reads, nas, warns, infos,
+				new ArrayList<>());
+		T.check(!r.isRead(SnapshotReads.LUNS), "a single 102 is unread");
+		T.check(r.unread.get(SnapshotReads.LUNS).contains("102"),
+				"the reason names the 102: " + r.unread);
+		T.check(!SnapshotIsolation.volumeChildrenKnown(r.unread,
+				java.util.Collections.emptyMap()),
+				"so Volume LUN edges are kept, not dropped");
+		try {
+			SnapshotIsolation.requireListRead(r.unread, "SynologyIscsiLun");
+			throw new AssertionError("an existing LUN must be ERROR, not absent");
+		} catch (IOException expected) {
+			// expected
+		}
+		nas.failing.clear();
+		T.check(read(reads, nas, warns, infos, new ArrayList<>())
+				.isRead(SnapshotReads.LUNS), "read again after the reboot");
+
+		// The successful read reset the count: the next 102 is a first one.
+		nas.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 102));
+		T.check(!read(reads, nas, warns, infos, new ArrayList<>())
+				.isRead(SnapshotReads.LUNS), "102, read, 102: still unread");
+
+		// Another failure in between also resets it.
+		nas.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 105));
+		T.check(!read(reads, nas, warns, infos, new ArrayList<>())
+				.isRead(SnapshotReads.LUNS), "105 is unread");
+		nas.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 102));
+		T.check(!read(reads, nas, warns, infos, new ArrayList<>())
+				.isRead(SnapshotReads.LUNS), "102, 105, 102: still unread");
+		SnapshotReads.Result<String> c = read(reads, nas, warns, infos,
+				new ArrayList<>());
+		T.check(c.isRead(SnapshotReads.LUNS), "two in a row: not installed");
+		T.eq(EMPTY, c.lunList, "read as the empty list");
+		T.eq(1, infos.size(), "one INFO, for the confirmed 102 only: " + infos);
+		T.eq(1, warns.size(), "one WARN, for the 105 only: " + warns);
+
+		// Per configuration: an edited instance starts with no first 102.
+		FakeNas fresh = new FakeNas();
+		fresh.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 102));
+		T.check(!read(new SnapshotReads(), fresh, new ArrayList<>(),
+				new ArrayList<>(), new ArrayList<>()).isRead(SnapshotReads.LUNS),
+				"a new configuration's first 102 is unread");
+
+		// A build that ends before the LUN list leaves the count alone.
+		SnapshotReads gap = new SnapshotReads();
+		FakeNas g = new FakeNas();
+		g.failing.put(SnapshotReads.LUNS, dsm(SnapshotReads.LUNS, 102));
+		read(gap, g, new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+		g.failing.put(SnapshotReads.FAN, new SynologyTransportException(
+				"transport error calling SYNO.Core.Hardware.FanSpeed get: refused",
+				SynologyFailures.classifyTransport(new ConnectException("x"))));
+		try {
+			read(gap, g, new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+			throw new AssertionError("a connect failure ends the build");
+		} catch (SynologyTransportException expected) {
+			// expected
+		}
+		g.failing.remove(SnapshotReads.FAN);
+		T.check(read(gap, g, new ArrayList<>(), new ArrayList<>(),
+				new ArrayList<>()).isRead(SnapshotReads.LUNS),
+				"the next 102 the endpoint answers confirms it");
 	}
 
 	static void checkpointRunsBeforeEveryCall() throws Exception {

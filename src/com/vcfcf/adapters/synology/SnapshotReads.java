@@ -37,6 +37,17 @@ import java.util.function.Consumer;
  * them the empty value means "none"; for FanSpeed or the NFS service an
  * empty value would publish defaults, so 102 there stays unread.
  *
+ * <p><b>Two answers in a row (review NIT-R1).</b> DSM may also answer 102
+ * for a moment, for example while SAN Manager is still starting after a
+ * NAS reboot. Taken at face value, that one cycle would read "no LUNs":
+ * existing LUN objects would get no data and Volume LUN edges would drop
+ * for the cycle. So the first 102 from an endpoint is unread (no WARN; the
+ * reason names it as a first 102), and only a second consecutive 102 from
+ * the same endpoint, on a later build of this configuration, is read as
+ * not installed. Any other answer from the endpoint (a successful read or
+ * another failure) resets the count; a build that ends before reaching the
+ * endpoint leaves it as it was.
+ *
  * <p>Three failures of an optional read still fail the build: an
  * interrupt, a DSM login refusal (the session expired and the re-login was
  * refused; carrying on would send one more failed login per remaining
@@ -130,6 +141,8 @@ final class SnapshotReads {
 
 	private final Set<String> warned = new HashSet<>();
 	private final Set<String> notInstalled = new HashSet<>();
+	/** Review NIT-R1: endpoints whose last answer was a first DSM error 102. */
+	private final Set<String> first102 = new HashSet<>();
 
 	/**
 	 * Logs in if needed, then reads every endpoint once, in the build 30
@@ -179,6 +192,7 @@ final class SnapshotReads {
 			synchronized (this) {
 				recovered = warned.remove(endpoint);
 				notInstalled.remove(endpoint);
+				first102.remove(endpoint);
 			}
 			if (recovered) {
 				info.accept("Optional DSM endpoint " + endpoint
@@ -195,10 +209,27 @@ final class SnapshotReads {
 			if (EMPTY_WHEN_NOT_INSTALLED.contains(endpoint)
 					&& SynologyFailures.dataApiCode(e)
 							== SynologyFailures.API_NOT_FOUND) {
+				boolean confirmed;
 				boolean first;
 				synchronized (this) {
-					warned.remove(endpoint);
-					first = notInstalled.add(endpoint);
+					confirmed = notInstalled.contains(endpoint)
+							|| first102.remove(endpoint);
+					if (confirmed) {
+						warned.remove(endpoint);
+						first = notInstalled.add(endpoint);
+					} else {
+						first102.add(endpoint);
+						first = false;
+					}
+				}
+				if (!confirmed) {
+					// Review NIT-R1: one 102 may be transient (SAN Manager
+					// still starting); unread this build, so existing LUNs
+					// are ERROR and Volume edges are kept, not dropped.
+					r.unread.put(endpoint, SynologyFailures.describe(e)
+							+ " (first DSM error 102: read as not installed "
+							+ "only if the next read answers 102 too)");
+					return empty;
 				}
 				if (first) {
 					info.accept("DSM endpoint " + endpoint + " does not exist "
@@ -215,6 +246,9 @@ final class SnapshotReads {
 			r.unread.put(endpoint, reason);
 			boolean first;
 			synchronized (this) {
+				// Review NIT-R1: another answer breaks a run of 102s.
+				first102.remove(endpoint);
+				notInstalled.remove(endpoint);
 				first = warned.add(endpoint);
 			}
 			if (first) {

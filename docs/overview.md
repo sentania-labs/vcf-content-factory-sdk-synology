@@ -142,8 +142,10 @@ normally — collection is never failed over the optional cross-link.
   cycle, with the framework's own log line for each); the DiskStation,
   pools, volumes, disks and SSD caches are still discovered and
   collected. A NAS without iSCSI answers DSM error 102 (the API does not
-  exist), which is read as no LUNs and no targets, so Volume relationships
-  still refresh there. A permanent refusal of the LUN or share list (a
+  exist), which is read as no LUNs and no targets from the second
+  consecutive cycle that answers it (a single 102, as while SAN Manager
+  starts after a reboot, is not read), so Volume relationships still
+  refresh there. A permanent refusal of the LUN or share list (a
   missing privilege) leaves Volume relationships unrefreshed until the
   account can read it. See docs/installing.md for the endpoint table and
   the minimum DSM privileges.

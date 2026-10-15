@@ -114,7 +114,10 @@ normally — collection is never failed over the optional cross-link.
   Block, which blocks the collector's IP (possibly shared with other
   integrations), so a wrong password now costs a handful of failed logins
   over hours instead of one per resource per cycle. Any other failure is
-  tried again on the next cycle.
+  tried again on the next cycle. During a wrong-password back-off the
+  adapter instance still shows **Collecting** in the account list while
+  every Synology object is ERROR: the adapter cannot change the instance
+  status (a framework limitation).
 - **An unreachable NAS costs one attempt per cycle and is DOWN (build
   31).** The DSM snapshot is built at most once per collection cycle,
   however many objects the NAS has and however long the build takes. When

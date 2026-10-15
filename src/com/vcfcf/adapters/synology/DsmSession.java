@@ -40,6 +40,15 @@ import java.io.IOException;
  * not the logout threw. Before, every configure built a logout client
  * that nothing discarded, one leaked client per reconfigure or removal.
  * A fault in the release step is swallowed: close never throws.
+ *
+ * <p><b>Not before an in-flight login's logout (review nit on 47e0d4d).</b>
+ * A login that started before close and returns after it logs its new
+ * session out over the same logout client, so releasing that client in
+ * close could pull it from under that logout. Logins in flight are
+ * counted under the lock: close runs the release step after its own
+ * logout only when no login is in flight; otherwise the last in-flight
+ * login runs it, after its own logout (or after its login failed). The
+ * step still runs exactly once.
  */
 final class DsmSession {
 
@@ -60,6 +69,13 @@ final class DsmSession {
 	private final Object lock = new Object();
 	private volatile String sid;
 	private volatile boolean closed;
+	/** Logins between their closed check and their end; under the lock. */
+	private int loginsInFlight;
+	/**
+	 * Close has done its own logout and the release step is still owed to
+	 * the last in-flight login; under the lock.
+	 */
+	private boolean releaseOwed;
 	/**
 	 * Test seam (review NIT-R2): run under the lock, between the login's
 	 * closed check and its store. {@code null} in production.
@@ -93,20 +109,35 @@ final class DsmSession {
 
 	/** Logs in, unless closed. */
 	String login() throws IOException, InterruptedException {
-		if (closed) throw new SynologyClientClosedException();
-		String s = loginCall.login();
 		synchronized (lock) {
-			if (!closed) {
-				Runnable hook = beforeStore;
-				if (hook != null) hook.run();
-				sid = s;
-				return s;
-			}
+			if (closed) throw new SynologyClientClosedException();
+			loginsInFlight++;
 		}
-		// Closed while this login was in flight: log the new session
-		// straight out rather than leave it behind.
-		logoutQuietly(s);
-		throw new SynologyClientClosedException();
+		try {
+			String s = loginCall.login();
+			synchronized (lock) {
+				if (!closed) {
+					Runnable hook = beforeStore;
+					if (hook != null) hook.run();
+					sid = s;
+					return s;
+				}
+			}
+			// Closed while this login was in flight: log the new session
+			// straight out rather than leave it behind.
+			logoutQuietly(s);
+			throw new SynologyClientClosedException();
+		} finally {
+			// After this login's own logout, if any: the last in-flight
+			// login runs a release step close left owed.
+			boolean runRelease;
+			synchronized (lock) {
+				loginsInFlight--;
+				runRelease = releaseOwed && loginsInFlight == 0;
+				if (runRelease) releaseOwed = false;
+			}
+			if (runRelease) releaseQuietly();
+		}
 	}
 
 	/** Logs in when there is no session; throws when closed. */
@@ -132,7 +163,8 @@ final class DsmSession {
 
 	/**
 	 * Closes the client for good: no login after this, then logout, then
-	 * (first close only) the release step.
+	 * (first close only) the release step, now if no login is in flight,
+	 * otherwise by the last in-flight login after its own logout.
 	 */
 	void close() {
 		String s;
@@ -147,13 +179,22 @@ final class DsmSession {
 			if (s != null) logoutQuietly(s);
 		} finally {
 			if (first && release != null) {
-				try {
-					release.run();
-				} catch (RuntimeException | LinkageError ignored) {
-					// Best effort: a failed release must not escape
-					// configure or discard.
+				boolean runRelease;
+				synchronized (lock) {
+					runRelease = loginsInFlight == 0;
+					releaseOwed = !runRelease;
 				}
+				if (runRelease) releaseQuietly();
 			}
+		}
+	}
+
+	private void releaseQuietly() {
+		try {
+			release.run();
+		} catch (RuntimeException | LinkageError ignored) {
+			// Best effort: a failed release must not escape configure,
+			// discard or the collect path.
 		}
 	}
 

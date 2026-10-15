@@ -271,5 +271,114 @@ public final class DsmSessionTest {
 		}
 		T.eq(List.of("sid1"), nas.logouts, "the in-flight session is logged out");
 		T.eq(1, released4[0], "released once");
+
+		inFlightLoginLogsOutBeforeTheRelease();
+	}
+
+	/**
+	 * Review nit on 47e0d4d: a login in flight when close runs (on another
+	 * thread) completes, logs its new session out over the logout client,
+	 * and only then is the client released, once. close returns without
+	 * releasing and without waiting. Also: a login that fails after close
+	 * runs the owed release; with two logins in flight, the last one runs it.
+	 */
+	static void inFlightLoginLogsOutBeforeTheRelease() throws Exception {
+		List<String> order = Collections.synchronizedList(new ArrayList<>());
+		CountDownLatch inLogin = new CountDownLatch(1);
+		CountDownLatch finishLogin = new CountDownLatch(1);
+		DsmSession s = new DsmSession(() -> {
+			inLogin.countDown();
+			finishLogin.await();
+			return "sidLate";
+		}, sid -> order.add("logout " + sid), () -> order.add("release"));
+		Throwable[] loginOutcome = new Throwable[1];
+		Thread login = new Thread(() -> {
+			try {
+				s.ensure();
+			} catch (Throwable t) {
+				loginOutcome[0] = t;
+			}
+		}, "login");
+		login.setDaemon(true); // a failed assertion must not hang the JVM
+		login.start();
+		T.check(inLogin.await(5, java.util.concurrent.TimeUnit.SECONDS),
+				"the login is in flight");
+		s.close(); // returns at once; the login still holds the client
+		T.eq(List.of(), new ArrayList<>(order),
+				"close does not release under an in-flight login");
+		finishLogin.countDown();
+		login.join(5000);
+		T.check(!login.isAlive(), "the login finished");
+		T.check(loginOutcome[0] instanceof SynologyClientClosedException,
+				"the late login sees the client closed: " + loginOutcome[0]);
+		T.eq(List.of("logout sidLate", "release"), new ArrayList<>(order),
+				"the late session is logged out, then the client released");
+		s.close();
+		T.eq(2, order.size(), "released exactly once");
+
+		// A login that fails after close still runs the owed release.
+		int[] released = {0};
+		DsmSession[] holder = new DsmSession[1];
+		holder[0] = new DsmSession(() -> {
+			holder[0].close(); // closed while this login is in flight
+			throw new IOException("login transport error");
+		}, sid -> {
+			throw new AssertionError("no session, no logout");
+		}, () -> released[0]++);
+		try {
+			holder[0].ensure();
+			throw new AssertionError("the failed login must throw");
+		} catch (IOException expected) {
+			// expected
+		}
+		T.eq(1, released[0], "a failed in-flight login runs the release");
+
+		// Two logins in flight: the last to finish runs the release.
+		List<String> order2 = Collections.synchronizedList(new ArrayList<>());
+		CountDownLatch bothIn = new CountDownLatch(2);
+		CountDownLatch goFirst = new CountDownLatch(1);
+		CountDownLatch goSecond = new CountDownLatch(1);
+		AtomicInteger n = new AtomicInteger();
+		DsmSession two = new DsmSession(() -> {
+			int k = n.incrementAndGet();
+			bothIn.countDown();
+			(k == 1 ? goFirst : goSecond).await();
+			return "sid" + k;
+		}, sid -> order2.add("logout " + sid), () -> order2.add("release"));
+		Thread t1 = new Thread(() -> {
+			try {
+				two.login();
+			} catch (Exception ignored) {
+				// closed
+			}
+		});
+		Thread t2 = new Thread(() -> {
+			try {
+				two.login();
+			} catch (Exception ignored) {
+				// closed
+			}
+		});
+		t1.setDaemon(true);
+		t2.setDaemon(true);
+		t1.start();
+		t2.start();
+		T.check(bothIn.await(5, java.util.concurrent.TimeUnit.SECONDS),
+				"both logins in flight");
+		two.close();
+		goFirst.countDown();
+		long deadline = System.currentTimeMillis() + 5000;
+		while (order2.isEmpty() && System.currentTimeMillis() < deadline) {
+			Thread.sleep(5);
+		}
+		Thread.sleep(50); // a wrongly early release would show up here
+		T.eq(List.of("logout sid1"), new ArrayList<>(order2),
+				"not released while the second login is in flight");
+		goSecond.countDown();
+		t1.join(5000);
+		t2.join(5000);
+		T.eq(List.of("logout sid1", "logout sid2", "release"),
+				new ArrayList<>(order2),
+				"released once, after the last in-flight logout");
 	}
 }

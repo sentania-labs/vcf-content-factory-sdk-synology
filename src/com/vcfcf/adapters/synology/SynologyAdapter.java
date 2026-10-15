@@ -269,8 +269,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		// API client has not logged in yet (its first snapshot build does),
 		// so the old session's logout cannot end the new one.
 		releaseConfiguration("instance reconfigured", oldConfigured,
-				oldSuiteStitcher == this.suiteStitcher ? null : oldSuiteStitcher,
-				oldHttpClient == this.httpClient ? null : oldHttpClient);
+				SnapshotIsolation.replaced(oldSuiteStitcher, this.suiteStitcher),
+				SnapshotIsolation.replaced(oldHttpClient, this.httpClient));
 	}
 
 	/**
@@ -644,6 +644,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			List<MetricData> out) throws IOException {
 		String kind = rc.getResourceKind();
 		if (kind == null) return;
+		// Build 31 (issue #14): a LUN or NFS export whose list was not read
+		// this cycle is ERROR, not "collected nothing"; see
+		// SnapshotIsolation.requireListRead.
+		snap.requireListRead(kind);
 		switch (kind) {
 			case "SynologyWorld":
 				// No domain metrics on the world (v1 parity — NO_DATA_RECEIVING).
@@ -924,9 +928,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	private void collectIscsiLun(ResourceConfig rc, Snapshot s, List<MetricData> out)
 			throws IOException {
 		String uuid = getIdentifier(rc, "lun_uuid");
-		// Build 31 (issue #14): the LUN list was not read this cycle, so this
-		// LUN is ERROR, not "collected nothing".
-		s.requireRead(SnapshotReads.LUNS);
+		// Build 31 (issue #14): dispatchCollect has already failed this LUN
+		// when the LUN list was not read this cycle.
 		SimpleJson lun = s.findLun(uuid);
 		if (lun == null) {
 			logWarn("collect: iscsi-lun " + uuid + " absent from snapshot");
@@ -963,9 +966,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	private void collectNfsExport(ResourceConfig rc, Snapshot s, List<MetricData> out)
 			throws IOException {
 		String name = getIdentifier(rc, "share_name");
-		// Build 31 (issue #14): the share list was not read this cycle, so
-		// this export is ERROR, not "collected nothing".
-		s.requireRead(SnapshotReads.SHARES);
+		// Build 31 (issue #14): dispatchCollect has already failed this
+		// export when the share list was not read this cycle.
 		SimpleJson share = s.findShare(name);
 		if (share == null) {
 			logWarn("collect: nfs-export " + name + " absent from snapshot");
@@ -1037,8 +1039,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		// Volume with the children that are known would drop its other edges
 		// for the cycle. So no Volume is a parent this cycle; its existing
 		// edges are kept.
-		final boolean volumeChildrenKnown = s.isRead(SnapshotReads.LUNS)
-				&& s.isRead(SnapshotReads.SHARES);
+		final boolean volumeChildrenKnown =
+				SnapshotIsolation.volumeChildrenKnown(s.unread);
 		if (!volumeChildrenKnown) {
 			logInfo("Relationships: Volume child edges (LUN, NFS export, SSD "
 					+ "cache) left unchanged this cycle: " + s.unread.keySet()
@@ -1273,13 +1275,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			return !unread.containsKey(endpoint);
 		}
 
-		/** Throws when {@code endpoint} was not read this cycle. */
-		void requireRead(String endpoint) throws IOException {
-			String reason = unread.get(endpoint);
-			if (reason != null) {
-				throw new IOException(endpoint + " was not readable this cycle: "
-						+ reason);
-			}
+		/**
+		 * Throws when {@code kind} depends on a list that was not read this
+		 * cycle; see {@link SnapshotIsolation#requireListRead}.
+		 */
+		void requireListRead(String kind) throws IOException {
+			SnapshotIsolation.requireListRead(unread, kind);
 		}
 
 		// Derived lookups

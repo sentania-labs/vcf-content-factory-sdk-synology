@@ -69,8 +69,13 @@ final class SnapshotReads {
 			new HashSet<>(java.util.Arrays.asList(DSM_INFO, SYSTEM_INFO,
 					UTILIZATION, STORAGE)));
 
+	/** The label of the abort check before the login (review NIT-3). */
+	static final String LOGIN = "SYNO.API.Auth login";
+
 	/** The DSM calls of one build ({@link SynologyApiClient} in production). */
 	interface Source<J> {
+		/** Logs in when there is no session yet. */
+		void ensureSession() throws IOException, InterruptedException;
 		J dsmInfo() throws IOException, InterruptedException;
 		J systemInfo() throws IOException, InterruptedException;
 		J utilization() throws IOException, InterruptedException;
@@ -127,7 +132,10 @@ final class SnapshotReads {
 	private final Set<String> notInstalled = new HashSet<>();
 
 	/**
-	 * Reads every endpoint once, in the build 30 order.
+	 * Logs in if needed, then reads every endpoint once, in the build 30
+	 * order. Review NIT-3: the abort check runs before the login too, so a
+	 * Stop Collecting already requested sends nothing, not even a login
+	 * that could wait out three 30 s attempts against a hung NAS.
 	 *
 	 * @param src   the DSM calls
 	 * @param empty the value stored for an optional endpoint not read
@@ -140,6 +148,8 @@ final class SnapshotReads {
 	<J> Result<J> read(Source<J> src, J empty, Checkpoint cp,
 			Consumer<String> warn, Consumer<String> info) throws Exception {
 		Result<J> r = new Result<>();
+		cp.check(LOGIN);
+		src.ensureSession();
 		r.dsmInfo = get(DSM_INFO, src::dsmInfo, empty, r, cp, warn, info);
 		r.systemInfo = get(SYSTEM_INFO, src::systemInfo, empty, r, cp, warn, info);
 		r.utilization = get(UTILIZATION, src::utilization, empty, r, cp, warn, info);

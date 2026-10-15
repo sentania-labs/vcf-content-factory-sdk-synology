@@ -37,6 +37,12 @@ public final class SnapshotReadsTest {
 	static final class FakeNas implements SnapshotReads.Source<String> {
 		final Map<String, Exception> failing = new HashMap<>();
 		final List<String> calls = new ArrayList<>();
+		int logins;
+
+		@Override
+		public void ensureSession() {
+			logins++;
+		}
 
 		private String answer(String endpoint) throws IOException,
 				InterruptedException {
@@ -311,7 +317,22 @@ public final class SnapshotReadsTest {
 		List<String> checks = new ArrayList<>();
 		read(new SnapshotReads(), nas, new ArrayList<>(), new ArrayList<>(),
 				checks);
-		T.eq(ORDER, checks, "an abort check before each call");
+		List<String> withLogin = new ArrayList<>();
+		withLogin.add(SnapshotReads.LOGIN);
+		withLogin.addAll(ORDER);
+		T.eq(withLogin, checks, "an abort check before the login and each call");
+		T.eq(1, nas.logins, "one login per build");
+		// Review NIT-3: Stop Collecting before the login sends nothing.
+		FakeNas early = new FakeNas();
+		try {
+			new SnapshotReads().read(early, EMPTY, next -> {
+				throw new SnapshotCache.AbortedException("Stop Collecting");
+			}, w -> { }, i -> { });
+			throw new AssertionError("abort expected");
+		} catch (SnapshotCache.AbortedException expected) {
+			T.eq(0, early.logins, "no login after Stop Collecting");
+			T.eq(0, early.calls.size(), "no DSM call after Stop Collecting");
+		}
 		FakeNas stopped = new FakeNas();
 		Set<String> seen = new HashSet<>();
 		try {

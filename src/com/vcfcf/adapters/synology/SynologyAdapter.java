@@ -640,10 +640,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			throw new IllegalStateException("Synology adapter instance is not "
 					+ "configured");
 		}
-		return c.snapshots.get(() -> {
-			c.api.ensureSession();
-			return Snapshot.build(c.api, c.reads, this);
-		}, this::logWarn);
+		// Review NIT-3: the login runs inside the read plan, after its own
+		// abort check (SnapshotReads.read), not before the first checkpoint.
+		return c.snapshots.get(() -> Snapshot.build(c.api, c.reads, this),
+				this::logWarn);
 	}
 
 	/**
@@ -1342,8 +1342,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		static Snapshot build(SynologyApiClient api, SnapshotReads reads,
 				SynologyAdapter adapter) throws Exception {
 			Snapshot s = new Snapshot();
-			// Build 31: SnapshotReads runs the abort checkpoint before each DSM
-			// call (issue #13) and fails the build only on the four required
+			// Build 31: SnapshotReads logs in if needed and runs the abort
+			// checkpoint before the login (review NIT-3) and before each DSM
+			// call (issue #13), and fails the build only on the four required
 			// endpoints (issue #14); an optional endpoint not read holds an
 			// empty payload and is listed in s.unread.
 			SnapshotReads.Result<SimpleJson> r = reads.read(api,

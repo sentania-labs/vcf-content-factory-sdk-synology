@@ -35,10 +35,36 @@ public final class SynologyConfig {
 		this.port = p;
 		this.username = (username != null) ? username : "";
 		this.password = (password != null) ? password : "";
-		this.allowInsecure = !"false".equalsIgnoreCase(allowInsecure);
+		this.allowInsecure = parseAllowInsecure(allowInsecure);
 		this.suiteApiUrl = (suiteApiUrl != null) ? suiteApiUrl.trim() : "";
 		this.suiteApiUser = (suiteApiUser != null) ? suiteApiUser.trim() : "";
 		this.suiteApiPassword = (suiteApiPassword != null) ? suiteApiPassword : "";
+	}
+
+	/**
+	 * Build 31 (issue #15): only the exact value {@code "true"} (any letter
+	 * case, no surrounding spaces) turns certificate validation off. Anything
+	 * else, including {@code null}, blank, {@code "yes"} or {@code " true"},
+	 * validates. Before build 31 the reverse held: everything except
+	 * {@code "false"} skipped validation, so a blank value or a typo turned
+	 * it off.
+	 */
+	static boolean parseAllowInsecure(String raw) {
+		return "true".equalsIgnoreCase(raw);
+	}
+
+	/**
+	 * Build 31 (issue #15): the WARN logged on every configure while insecure
+	 * mode is on, or {@code null} when the NAS certificate is validated. No
+	 * credential or session text, only the address.
+	 */
+	String insecureWarning() {
+		if (!allowInsecure) return null;
+		return "Allow Insecure SSL is true for " + host + ":" + port
+				+ ": the NAS certificate is not validated, so the DSM "
+				+ "credentials and session id go to whatever answers at that "
+				+ "address. Set Allow Insecure SSL to false unless this is a lab "
+				+ "NAS you accept that for.";
 	}
 
 	public String baseUrl() {

@@ -37,9 +37,31 @@ the collector and requires no additional outbound network configuration.
 
 ## TLS — certificate trust
 
-If the DiskStation presents a self-signed or otherwise untrusted
-certificate on port 5001, set **`allowInsecure=true`** on the adapter
-instance, or import the NAS certificate into the platform trust store.
+DSM ships a self-signed certificate on port 5001. By default
+(`allowInsecure` is `false`) the adapter validates the NAS certificate
+chain through the VCF Operations platform trust manager. This build does
+not offer the NAS certificate for review in Validate Connection, so an
+untrusted certificate (DSM's factory self-signed one, for example) fails
+Test Connection with a message that says the certificate is not trusted.
+Import the NAS certificate (or the CA that signed it) into the platform
+trust store, or replace the DSM certificate with one the platform already
+trusts.
+
+Setting **`allowInsecure=true`** turns certificate validation off, so the
+DSM credentials and session id go to whatever answers at that address.
+Use it only where you accept that, for example a lab NAS with its factory
+self-signed certificate. While it is on, the adapter logs a WARN each time
+the instance is configured.
+
+Upgrading from build 30 or earlier: existing instances keep their stored
+`allowInsecure` value. An instance created with the old default stores
+`true` and keeps skipping validation until you edit it to `false`. Only
+the exact value `true` (any letter case) turns validation off. This is
+stricter than build 30, which skipped validation for every value except
+`false`: an existing instance whose stored value is blank, `yes`, `1` or
+any other text now validates the NAS certificate, and if that certificate
+is untrusted its collection fails with a certificate message until you
+set `allowInsecure=true` or import the certificate.
 
 ## Configuration Fields
 
@@ -50,7 +72,7 @@ for:
 |-------|-----|----------|---------|-------|
 | Host / IP Address | `host` | Yes | — | NAS hostname or IP. |
 | Port (HTTPS, default 5001) | `port` | No | 5001 | DSM HTTPS Web API port. |
-| Allow Insecure SSL (true/false) | `allowInsecure` | No | false | `true` disables certificate validation for the NAS. |
+| Allow Insecure SSL (true/false) | `allowInsecure` | No | false | `true` turns off certificate validation for the NAS (lab use only). Any other value validates. |
 | Username | `username` | Yes | — | DSM account with API access. |
 | Password | `password` | Yes | — | DSM account password (masked). |
 
@@ -60,16 +82,18 @@ for:
 2. After installation, navigate to **Data Sources > Integrations > Accounts**.
 3. Click **Add Account** and select **VCF Content Factory Synology DiskStation**.
 4. Fill in the configuration fields above (host, port `5001`, DSM
-   credentials; set `allowInsecure=true` if the NAS certificate is
-   untrusted).
+   credentials; leave `allowInsecure` at `false` unless the NAS
+   certificate is untrusted and you accept the lab-only opt-out described
+   under TLS above).
 5. Click **Validate Connection**, then **Add**.
 6. The adapter discovers the storage tree and begins collecting on the
    next cycle (default 5 minutes).
 
 ## Troubleshooting
 
-- **Test Connection fails on TLS** — the NAS certificate is untrusted.
-  Set `allowInsecure=true` or import the certificate.
+- **Test Connection fails on TLS**: the NAS certificate is untrusted
+  (see TLS above). Import the certificate, or set `allowInsecure=true`
+  only if you accept an unvalidated connection.
 - **A resource shows ERROR with no metrics** — DSM returned a
   success-shaped but empty payload for a critical endpoint; the adapter
   surfaces this as ERROR rather than publishing `0.0` sentinels. Verify the

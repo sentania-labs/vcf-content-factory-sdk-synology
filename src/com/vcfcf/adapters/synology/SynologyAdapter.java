@@ -194,6 +194,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		logInfo("SynologyAdapter configured: host=" + cfg.host
 				+ " port=" + cfg.port + " allowInsecure=" + cfg.allowInsecure
 				+ " datastoreCrossLink=" + (stitcher != null));
+		// Build 31 (issue #15): one WARN per configure while insecure mode is on.
+		String insecure = cfg.insecureWarning();
+		if (insecure != null) {
+			logWarn(insecure);
+		}
 	}
 
 	private SynologyConfig buildConfig(ResourceConfig rc) {
@@ -221,6 +226,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				.timeout(Duration.ofSeconds(30));
 		if (cfg.allowInsecure) {
 			// Lab opt-out: Synology DSM ships a self-signed cert by default.
+			// Build 31 (issue #15): only an explicit "true" gets here.
 			b.allowInsecure(true);
 		} else {
 			b.platformSsl(this);

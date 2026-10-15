@@ -11,6 +11,7 @@ public final class AllowInsecureTest {
 	public static void main(String[] args) {
 		strictParse();
 		warningOnlyWhileInsecure();
+		certificateReviewOfferedWhileSecure();
 		System.out.println("AllowInsecureTest: all assertions passed");
 	}
 
@@ -29,6 +30,48 @@ public final class AllowInsecureTest {
 				"a blank identifier validates");
 		T.check(new SynologyConfig("h", null, "u", "p", "true").allowInsecure,
 				"an explicit true keeps working after upgrade");
+	}
+
+	/**
+	 * Review W1: Validate Connection offers the NAS certificate for review
+	 * exactly while validation is on, at the address the client connects
+	 * to; nothing to review for an insecure or incomplete config.
+	 */
+	static void certificateReviewOfferedWhileSecure() {
+		T.eq(java.util.List.of("https://nas.lab:5001/"),
+				SynologyConfig.certificateCheckUrls("nas.lab", null, null),
+				"absent port and insecure: 5001, reviewed");
+		T.eq(java.util.List.of("https://nas.lab:5001/"),
+				SynologyConfig.certificateCheckUrls(" nas.lab ", "", "false"),
+				"host trimmed, blank port is 5001");
+		T.eq(java.util.List.of("https://10.0.0.5:5551/"),
+				SynologyConfig.certificateCheckUrls("10.0.0.5", "5551", "false"),
+				"the configured port");
+		T.eq(java.util.List.of("https://nas.lab:5001/"),
+				SynologyConfig.certificateCheckUrls("nas.lab", "https", null),
+				"a non-numeric port is the client's 5001");
+		T.eq(java.util.List.of("https://nas.lab:5001/"),
+				SynologyConfig.certificateCheckUrls("nas.lab", "5001", " true"),
+				"' true' validates (strict parse), so it is reviewed");
+		for (String v : new String[] {"true", "TRUE", "True"}) {
+			T.eq(0, SynologyConfig.certificateCheckUrls("nas.lab", "5001", v)
+					.size(), v + ": insecure, nothing to review");
+		}
+		T.eq(0, SynologyConfig.certificateCheckUrls(null, "5001", null).size(),
+				"no host");
+		T.eq(0, SynologyConfig.certificateCheckUrls("  ", "5001", null).size(),
+				"blank host");
+		T.eq(0, SynologyConfig.certificateCheckUrls("nas.lab", "70000", null)
+				.size(), "port out of range");
+		T.eq(0, SynologyConfig.certificateCheckUrls("nas.lab", "0", null)
+				.size(), "port zero");
+		for (String port : new String[] {null, "", "5551", "https"}) {
+			T.eq(new SynologyConfig("nas.lab", port, "u", "p", null).baseUrl()
+					+ "/", SynologyConfig.certificateCheckUrls("nas.lab", port,
+							null).get(0),
+					"the reviewed URL is the address the client connects to ("
+					+ port + ")");
+		}
 	}
 
 	static void warningOnlyWhileInsecure() {

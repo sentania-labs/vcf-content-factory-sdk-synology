@@ -96,19 +96,33 @@ the collector and requires no additional outbound network configuration.
 
 DSM ships a self-signed certificate on port 5001. By default
 (`allowInsecure` is `false`) the adapter validates the NAS certificate
-chain through the VCF Operations platform trust manager. This build does
-not offer the NAS certificate for review in Validate Connection, so an
-untrusted certificate (DSM's factory self-signed one, for example) fails
-Test Connection with a message that says the certificate is not trusted.
-Import the NAS certificate (or the CA that signed it) into the platform
-trust store, or replace the DSM certificate with one the platform already
-trusts.
+chain through the VCF Operations platform trust manager. A chain is
+trusted when it is issued by a CA in the VCF Operations trust store, or
+when it is a certificate you accepted for this instance.
+
+When you click **Validate Connection** (build 31 and later):
+
+1. **The certificate is already trusted** (issued by a CA the VCF
+   Operations trust store holds): validation goes straight on to the
+   connection test. No dialog.
+2. **The certificate is not trusted** (DSM's factory self-signed
+   certificate, or a private CA VCF Operations does not know): VCF
+   Operations shows its **Review and Accept Certificate** dialog with the
+   NAS certificate. Check the details (issuer, validity, thumbprint
+   against what DSM shows under Control Panel > Security > Certificate)
+   and accept it. Validation then runs the connection test. The accepted
+   certificate is stored on this instance and trusted on every collection
+   cycle; validation stays on.
+
+If the NAS certificate changes later (renewed or replaced), collection
+fails with a certificate error. Open the instance, click **Validate
+Connection** and accept the new certificate.
 
 Setting **`allowInsecure=true`** turns certificate validation off, so the
-DSM credentials and session id go to whatever answers at that address.
-Use it only where you accept that, for example a lab NAS with its factory
-self-signed certificate. While it is on, the adapter logs a WARN each time
-the instance is configured.
+DSM credentials and session id go to whatever answers at that address,
+and no certificate is offered for review. A self-signed NAS does not need
+it: accept its certificate once as above instead. While it is on, the
+adapter logs a WARN each time the instance is configured.
 
 Upgrading from build 30 or earlier: existing instances keep their stored
 `allowInsecure` value. An instance created with the old default stores
@@ -118,7 +132,8 @@ stricter than build 30, which skipped validation for every value except
 `false`: an existing instance whose stored value is blank, `yes`, `1` or
 any other text now validates the NAS certificate, and if that certificate
 is untrusted its collection fails with a certificate message until you
-set `allowInsecure=true` or import the certificate.
+open the instance, click **Validate Connection** and accept the
+certificate (or set `allowInsecure=true`).
 
 ## Configuration Fields
 
@@ -139,18 +154,19 @@ for:
 2. After installation, navigate to **Data Sources > Integrations > Accounts**.
 3. Click **Add Account** and select **VCF Content Factory Synology DiskStation**.
 4. Fill in the configuration fields above (host, port `5001`, DSM
-   credentials; leave `allowInsecure` at `false` unless the NAS
-   certificate is untrusted and you accept the lab-only opt-out described
-   under TLS above).
-5. Click **Validate Connection**, then **Add**.
+   credentials; leave `allowInsecure` at `false`).
+5. Click **Validate Connection**. For a self-signed or private-CA NAS,
+   VCF Operations shows the NAS certificate for review: accept it (see
+   TLS above). Then click **Add**.
 6. The adapter discovers the storage tree and begins collecting on the
    next cycle (default 5 minutes).
 
 ## Troubleshooting
 
-- **Test Connection fails on TLS**: the NAS certificate is untrusted
-  (see TLS above). Import the certificate, or set `allowInsecure=true`
-  only if you accept an unvalidated connection.
+- **Test Connection fails on TLS**: the NAS certificate is untrusted and
+  was not accepted (see TLS above). Click **Validate Connection** again
+  and accept the certificate in the review dialog. Set
+  `allowInsecure=true` only if you accept an unvalidated connection.
 - **The adapter log has `Optional DSM endpoint ... is not readable`**
   (build 31+). That endpoint was refused or is not offered by this model
   or DSM edition; see the optional endpoint table above for what is

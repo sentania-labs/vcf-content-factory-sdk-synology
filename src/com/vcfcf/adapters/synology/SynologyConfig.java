@@ -1,5 +1,8 @@
 package com.vcfcf.adapters.synology;
 
+import java.util.Collections;
+import java.util.List;
+
 public final class SynologyConfig {
 
 	public final String host;
@@ -51,6 +54,33 @@ public final class SynologyConfig {
 	 */
 	static boolean parseAllowInsecure(String raw) {
 		return "true".equalsIgnoreCase(raw);
+	}
+
+	/**
+	 * Build 31 (review W1): the NAS endpoint VCF Operations offers for
+	 * certificate review on Validate Connection, from the raw identifier
+	 * values of the passed (possibly unsaved) config. Empty when Allow
+	 * Insecure SSL is on, the host is blank, or the port the client would
+	 * use is not 1 to 65535, so the platform check stays off and the
+	 * connection test reports the real problem. The insecure test is
+	 * {@link #parseAllowInsecure} on the untrimmed value, the same one the
+	 * client uses: a stored {@code " true"} connects securely, so it must
+	 * get the dialog. The port is the client's own parse (blank or not a
+	 * number is 5001), so the reviewed address is the one the client
+	 * connects to.
+	 *
+	 * @return {@code https://<host>:<port>/}, or empty
+	 */
+	static List<String> certificateCheckUrls(String host, String port,
+			String allowInsecure) {
+		if (parseAllowInsecure(allowInsecure)) return Collections.emptyList();
+		if (host == null || host.trim().isEmpty()) {
+			return Collections.emptyList();
+		}
+		int n = new SynologyConfig(host, port, null, null, allowInsecure).port;
+		if (n < 1 || n > 65535) return Collections.emptyList();
+		return Collections.singletonList("https://" + host.trim() + ":" + n
+				+ "/");
 	}
 
 	/**

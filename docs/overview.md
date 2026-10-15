@@ -123,6 +123,15 @@ normally — collection is never failed over the optional cross-link.
   timeouts are one 30 s value, because the framework HTTP client offers
   no separate connect timeout.
 
+- **One optional DSM endpoint no longer hides the whole NAS (build 31).**
+  Only DSM info, system info, utilization and storage load_info are
+  required. Any other endpoint that fails (FanSpeed on Virtual DSM, NFS or
+  iSCSI not installed, CurrentConnection without the privilege) is logged
+  once at WARN and only what depends on it is skipped; the DiskStation,
+  pools, volumes, disks and SSD caches are still discovered and
+  collected. See docs/installing.md for the endpoint table and the minimum
+  DSM privileges.
+
 ## Known Limitations
 
 - **No remediation / control actions.** The pack is read-only monitoring.

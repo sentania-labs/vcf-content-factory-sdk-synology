@@ -26,7 +26,7 @@ import java.net.http.HttpResponse;
  * auth strategies. This is a framework gap: a QueryParamAuth strategy
  * should be added for APIs that authenticate via query parameters.
  */
-public final class SynologyApiClient {
+public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson> {
 
 	private static final String SESSION_NAME = "VCFContentFactory";
 

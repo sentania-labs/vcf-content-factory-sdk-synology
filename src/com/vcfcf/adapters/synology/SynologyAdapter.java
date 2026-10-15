@@ -136,14 +136,20 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	/** Build 31 (issue #12): the cap on the doubled authentication back-off. */
 	private static final long MAX_AUTH_FAILURE_BACKOFF_MS = 60L * 60_000L;
 
-	/** One configuration's DSM API client and snapshot cache (immutable). */
+	/**
+	 * One configuration's DSM API client, snapshot cache and optional-endpoint
+	 * WARN state (build 31, issue #14) (immutable).
+	 */
 	private static final class Configured {
 		final SynologyApiClient api;
 		final SnapshotCache<Snapshot> snapshots;
+		final SnapshotReads reads;
 
-		Configured(SynologyApiClient api, SnapshotCache<Snapshot> snapshots) {
+		Configured(SynologyApiClient api, SnapshotCache<Snapshot> snapshots,
+				SnapshotReads reads) {
 			this.api = api;
 			this.snapshots = snapshots;
+			this.reads = reads;
 		}
 	}
 
@@ -177,7 +183,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 						componentLogger(SynologyApiClient.class)),
 				new SnapshotCache<>(System::currentTimeMillis,
 						MAX_SNAPSHOT_AGE_MS, FAILURE_RETRY_BACKOFF_MS,
-						AUTH_FAILURE_BACKOFF_MS, MAX_AUTH_FAILURE_BACKOFF_MS));
+						AUTH_FAILURE_BACKOFF_MS, MAX_AUTH_FAILURE_BACKOFF_MS),
+				new SnapshotReads());
 
 		// Optional Datastore cross-link transport (build 16; explicit-creds
 		// branch build 21). Two paths, selected by config:
@@ -569,7 +576,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 		return c.snapshots.get(() -> {
 			c.api.ensureSession();
-			return Snapshot.build(c.api, this);
+			return Snapshot.build(c.api, c.reads, this);
 		}, this::logWarn);
 	}
 
@@ -595,7 +602,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	}
 
 	private void dispatchCollect(ResourceConfig rc, Snapshot snap,
-			List<MetricData> out) {
+			List<MetricData> out) throws IOException {
 		String kind = rc.getResourceKind();
 		if (kind == null) return;
 		switch (kind) {
@@ -688,13 +695,21 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 		metric(out, "Network|net_rx_bytes", rxTotal);
 		metric(out, "Network|net_tx_bytes", txTotal);
-		metric(out, "Network|nic_count", (double) s.networkInterfaces.data().size());
+		// Build 31 (issue #14): a key whose optional endpoint was not read
+		// this cycle is skipped, never published as 0, "unknown" or "false".
+		if (s.isRead(SnapshotReads.NICS)) {
+			metric(out, "Network|nic_count", (double) s.networkInterfaces.data().size());
+		}
 
-		prop(out, "Fan|fan_status", fan.data().get("cool_fan").asString("unknown"));
-		prop(out, "Fan|fan_speed_mode", fan.data().get("dual_fan_speed").asString("unknown"));
+		if (s.isRead(SnapshotReads.FAN)) {
+			prop(out, "Fan|fan_status", fan.data().get("cool_fan").asString("unknown"));
+			prop(out, "Fan|fan_speed_mode", fan.data().get("dual_fan_speed").asString("unknown"));
+		}
 
-		prop(out, "NFS|nfs_enabled", nfs.data().get("enable_nfs").asBoolean() ? "true" : "false");
-		prop(out, "NFS|nfs_v4_enabled", nfs.data().get("enable_nfs_v4").asBoolean() ? "true" : "false");
+		if (s.isRead(SnapshotReads.NFS_SERVICE)) {
+			prop(out, "NFS|nfs_enabled", nfs.data().get("enable_nfs").asBoolean() ? "true" : "false");
+			prop(out, "NFS|nfs_v4_enabled", nfs.data().get("enable_nfs_v4").asBoolean() ? "true" : "false");
+		}
 
 		SimpleJson nfsUtil = util.data().get("nfs");
 		if (!nfsUtil.isNull() && nfsUtil.size() > 0) {
@@ -705,13 +720,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			metric(out, "NFS|nfs_max_latency", nfsRow.get("total_max_latency").asDouble());
 		}
 
-		int nfsClients = 0;
-		for (SimpleJson conn : s.connections.data().get("items").asList()) {
-			if ("NFS".equals(conn.get("protocol").asString())) {
-				nfsClients++;
+		if (s.isRead(SnapshotReads.CONNECTIONS)) {
+			int nfsClients = 0;
+			for (SimpleJson conn : s.connections.data().get("items").asList()) {
+				if ("NFS".equals(conn.get("protocol").asString())) {
+					nfsClients++;
+				}
 			}
+			metric(out, "NFS|nfs_client_count", (double) nfsClients);
 		}
-		metric(out, "NFS|nfs_client_count", (double) nfsClients);
 	}
 
 	private void collectStoragePool(ResourceConfig rc, Snapshot s, List<MetricData> out) {
@@ -865,8 +882,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				String.valueOf(cache.get("disk_failure_number").asLong()));
 	}
 
-	private void collectIscsiLun(ResourceConfig rc, Snapshot s, List<MetricData> out) {
+	private void collectIscsiLun(ResourceConfig rc, Snapshot s, List<MetricData> out)
+			throws IOException {
 		String uuid = getIdentifier(rc, "lun_uuid");
+		// Build 31 (issue #14): the LUN list was not read this cycle, so this
+		// LUN is ERROR, not "collected nothing".
+		s.requireRead(SnapshotReads.LUNS);
 		SimpleJson lun = s.findLun(uuid);
 		if (lun == null) {
 			logWarn("collect: iscsi-lun " + uuid + " absent from snapshot");
@@ -879,12 +900,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		prop(out, "Configuration|location", lun.get("location").asString(""));
 		prop(out, "Configuration|type", lun.get("type_str").asString(""));
 
-		String iqn = s.targetIqnByName.get(name);
-		prop(out, "Configuration|target_iqn", iqn != null ? iqn : "");
-		String enabled = s.targetEnabledByName.get(name);
-		prop(out, "Configuration|target_enabled", enabled != null ? enabled : "");
-		String portals = s.targetPortalsByName.get(name);
-		prop(out, "Configuration|network_portals", portals != null ? portals : "");
+		if (s.isRead(SnapshotReads.TARGETS)) {
+			String iqn = s.targetIqnByName.get(name);
+			prop(out, "Configuration|target_iqn", iqn != null ? iqn : "");
+			String enabled = s.targetEnabledByName.get(name);
+			prop(out, "Configuration|target_enabled", enabled != null ? enabled : "");
+			String portals = s.targetPortalsByName.get(name);
+			prop(out, "Configuration|network_portals", portals != null ? portals : "");
+		}
 
 		SimpleJson io = s.lunIoByUuid.get(uuid);
 		if (io != null) {
@@ -898,8 +921,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 	}
 
-	private void collectNfsExport(ResourceConfig rc, Snapshot s, List<MetricData> out) {
+	private void collectNfsExport(ResourceConfig rc, Snapshot s, List<MetricData> out)
+			throws IOException {
 		String name = getIdentifier(rc, "share_name");
+		// Build 31 (issue #14): the share list was not read this cycle, so
+		// this export is ERROR, not "collected nothing".
+		s.requireRead(SnapshotReads.SHARES);
 		SimpleJson share = s.findShare(name);
 		if (share == null) {
 			logWarn("collect: nfs-export " + name + " absent from snapshot");
@@ -937,8 +964,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		double used = share.get("share_quota_used").asDouble();
 		metric(out, "Capacity|quota_usage_pct", quota > 0 ? (used / quota) * 100.0 : 0.0);
 
-		metric(out, "Clients|active_client_count",
-				(double) s.nfsClientsByShare.getOrDefault(name, 0));
+		if (s.isRead(SnapshotReads.CONNECTIONS)) {
+			metric(out, "Clients|active_client_count",
+					(double) s.nfsClientsByShare.getOrDefault(name, 0));
+		}
 	}
 
 	private void collectUps(ResourceConfig rc, Snapshot s, List<MetricData> out) {
@@ -972,6 +1001,21 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		ResourceKey diskstation = rb.resource("SynologyDiskstation", dsName,
 				"serial", serial);
 		rb.parent(world, diskstation);
+
+		// Build 31 (issue #14): own-adapter parents are full-set (the platform
+		// replaces a parent's children with what is emitted). A Volume's
+		// children come from the LUN list, the share list and the SSD caches;
+		// when the LUN or share list was not read this cycle, emitting the
+		// Volume with the children that are known would drop its other edges
+		// for the cycle. So no Volume is a parent this cycle; its existing
+		// edges are kept.
+		final boolean volumeChildrenKnown = s.isRead(SnapshotReads.LUNS)
+				&& s.isRead(SnapshotReads.SHARES);
+		if (!volumeChildrenKnown) {
+			logInfo("Relationships: Volume child edges (LUN, NFS export, SSD "
+					+ "cache) left unchanged this cycle: " + s.unread.keySet()
+					+ " not read");
+		}
 
 		// disk id -> human name
 		Map<String, String> diskNames = new HashMap<>();
@@ -1020,7 +1064,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 
 		// iSCSI LUN -> child of Volume (joined by location == vol_path)
-		for (SimpleJson lun : s.lunList.data().get("luns").asList()) {
+		for (SimpleJson lun : volumeChildrenKnown
+				? s.lunList.data().get("luns").asList()
+				: java.util.Collections.<SimpleJson>emptyList()) {
 			String uuid = lun.get("uuid").asString();
 			String location = lun.get("location").asString();
 			for (SimpleJson vol : storage.data().get("volumes").asList()) {
@@ -1036,7 +1082,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 
 		// NFS Export -> child of Volume (joined by vol_path)
-		for (SimpleJson share : s.shares.data().get("shares").asList()) {
+		for (SimpleJson share : volumeChildrenKnown
+				? s.shares.data().get("shares").asList()
+				: java.util.Collections.<SimpleJson>emptyList()) {
 			String name = share.get("name").asString();
 			SimpleJson rules = s.nfsRulesByShare.get(name);
 			if (rules == null || rules.data().get("rule").size() == 0) continue;
@@ -1063,7 +1111,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				ResourceKey cacheKey = rb.resource("SynologySsdCache",
 						cacheDisplayName(cache, storage), "cache_id", cacheId);
 
-				for (SimpleJson vol : storage.data().get("volumes").asList()) {
+				for (SimpleJson vol : volumeChildrenKnown
+						? storage.data().get("volumes").asList()
+						: java.util.Collections.<SimpleJson>emptyList()) {
 					if (mountSpaceId.equals(vol.get("id").asString(""))) {
 						String volId = vol.get("volume_id").asString(vol.get("vol_path").asString());
 						ResourceKey volKey = rb.resource("SynologyVolume",
@@ -1255,7 +1305,27 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson networkInterfaces;
 		SimpleJson connections;
 		SimpleJson shares;
-		SimpleJson ups; // nullable — UPS optional
+		SimpleJson ups; // nullable: UPS optional
+
+		/**
+		 * Build 31 (issue #14): optional endpoints not read this cycle,
+		 * endpoint to reason. Their dependent keys, objects and edges are
+		 * skipped; the field holds an empty payload.
+		 */
+		Map<String, String> unread = new java.util.LinkedHashMap<>();
+
+		boolean isRead(String endpoint) {
+			return !unread.containsKey(endpoint);
+		}
+
+		/** Throws when {@code endpoint} was not read this cycle. */
+		void requireRead(String endpoint) throws IOException {
+			String reason = unread.get(endpoint);
+			if (reason != null) {
+				throw new IOException(endpoint + " was not readable this cycle: "
+						+ reason);
+			}
+		}
 
 		// Derived lookups
 		final Map<String, SimpleJson> diskIoByDevice = new HashMap<>();
@@ -1267,32 +1337,28 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		final Map<String, SimpleJson> nfsRulesByShare = new HashMap<>();
 		final Map<String, Integer> nfsClientsByShare = new HashMap<>();
 
-		static Snapshot build(SynologyApiClient api, SynologyAdapter adapter)
-				throws Exception {
+		static Snapshot build(SynologyApiClient api, SnapshotReads reads,
+				SynologyAdapter adapter) throws Exception {
 			Snapshot s = new Snapshot();
-			// Build 31 (issue #13): an abort checkpoint before each DSM call.
-			adapter.checkpoint("DSM.Info");
-			s.dsmInfo = api.dsmInfo();
-			adapter.checkpoint("Core.System info");
-			s.systemInfo = api.systemInfo();
-			adapter.checkpoint("Core.System.Utilization");
-			s.utilization = api.utilization();
-			adapter.checkpoint("Core.Hardware.FanSpeed");
-			s.fanSpeed = api.fanSpeed();
-			adapter.checkpoint("Core.FileServ.NFS");
-			s.nfsService = api.nfsServiceGet();
-			adapter.checkpoint("Storage load_info");
-			s.storage = api.storageLoadInfo();
-			adapter.checkpoint("Core.ISCSI.LUN list");
-			s.lunList = api.iscsiLunList();
-			adapter.checkpoint("Core.ISCSI.Target list");
-			s.targets = api.iscsiTargetList();
-			adapter.checkpoint("Core.Network.Interface list");
-			s.networkInterfaces = api.networkInterfaceList();
-			adapter.checkpoint("Core.CurrentConnection");
-			s.connections = api.currentConnections();
-			adapter.checkpoint("Core.Share list");
-			s.shares = api.shareList();
+			// Build 31: SnapshotReads runs the abort checkpoint before each DSM
+			// call (issue #13) and fails the build only on the four required
+			// endpoints (issue #14); an optional endpoint not read holds an
+			// empty payload and is listed in s.unread.
+			SnapshotReads.Result<SimpleJson> r = reads.read(api,
+					SimpleJson.parse("{}"), adapter::checkpoint,
+					adapter::logWarn, adapter::logInfo);
+			s.dsmInfo = r.dsmInfo;
+			s.systemInfo = r.systemInfo;
+			s.utilization = r.utilization;
+			s.fanSpeed = r.fanSpeed;
+			s.nfsService = r.nfsService;
+			s.storage = r.storage;
+			s.lunList = r.lunList;
+			s.targets = r.targets;
+			s.networkInterfaces = r.networkInterfaces;
+			s.connections = r.connections;
+			s.shares = r.shares;
+			s.unread = r.unread;
 
 			// NIT-1 (build-15): contract-assert one required field on the two
 			// critical endpoints that drive the diskstation singleton's metrics.
@@ -1319,7 +1385,16 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				if (ups.data().get("usb_ups_connect").asBoolean()) {
 					s.ups = ups;
 				}
+			} catch (InterruptedException ie) {
+				throw ie;
 			} catch (Exception e) {
+				// Build 31 (issues #12, #13): a refused re-login or a NAS that
+				// stopped accepting connections fails the build, as for every
+				// other optional endpoint (SnapshotReads).
+				if (SynologyFailures.authCode(e) != 0
+						|| SynologyFailures.isConnectFailure(e)) {
+					throw e;
+				}
 				adapter.logInfo("Snapshot: UPS not available: " + e.getMessage());
 			}
 
@@ -1335,7 +1410,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					+ volCount + " volumes / " + diskCount + " disks / "
 					+ cacheCount + " ssd-caches / " + lunCount + " luns / "
 					+ s.nfsRulesByShare.size() + " nfs-exports / ups="
-					+ (s.ups != null));
+					+ (s.ups != null)
+					+ (s.unread.isEmpty() ? "" : " / not read: " + s.unread.keySet()));
 			if (diskCount == 0) {
 				adapter.logWarn("Synology API snapshot: 0 disks returned from "
 						+ "storage load_info — expected a populated DiskStation");
@@ -1400,6 +1476,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 						throw new IOException("NFS rule probe for share " + name
 								+ " could not connect to the NAS: "
 								+ e.getMessage(), e);
+					}
+					// Build 31 (issue #14): a refused re-login fails the build
+					// too; probing on would send one failed login per share.
+					if (SynologyFailures.authCode(e) != 0) {
+						throw e;
 					}
 					adapter.logWarn("Snapshot: NFS rule probe failed for share "
 							+ name + ": " + e.getMessage());

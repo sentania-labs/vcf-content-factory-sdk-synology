@@ -7,18 +7,57 @@
 - A Synology DiskStation running **DSM 7.2 or later**.
 - Network reachability from the VCF Operations collector to the NAS on
   **TCP 5001** (DSM HTTPS Web API).
-- A **DSM account with API / admin access**. The DSM Web API authenticates
-  with an account that can read system, storage, iSCSI, NFS, and UPS
-  information.
+- A **DSM account in the administrators group**, without 2-step
+  verification (see Permissions Required below).
 
 ## Permissions Required
 
-The DSM account needs read access to the DSM Web API endpoints the adapter
-queries: system info and utilization, storage pools / volumes / disks,
-iSCSI LUN listing and IO, NFS share listing and rules, SSD cache, and UPS.
-An administrator account satisfies this; if you scope a dedicated account,
-ensure it can read these areas via the DSM API. The adapter only reads — it
-performs no writes.
+The adapter only reads; it performs no writes.
+
+**Minimum privileges (build 31+).** Four DSM Web API endpoints are
+required. If any of them is refused, the snapshot fails and nothing is
+discovered or collected for that cycle:
+
+| Required endpoint | Carries |
+|---|---|
+| `SYNO.DSM.Info` | DiskStation model, serial, temperature, uptime |
+| `SYNO.Core.System` (info) | hostname, firmware |
+| `SYNO.Core.System.Utilization` | CPU, memory, network, disk / volume / LUN IO |
+| `SYNO.Storage.CGI.Storage` (load_info) | storage pools, volumes, disks, SSD caches |
+
+These are the endpoints behind DSM's Info Center, Resource Monitor and
+Storage Manager, which DSM offers to members of the administrators group,
+so use an account in that group. A non-administrator account has not been
+tested with this adapter. The account must not require 2-step
+verification: the adapter cannot answer a one-time code, so DSM refuses
+the login (error 403 or 406) and the adapter backs off as for a wrong
+password.
+
+Every other endpoint is optional. When one is refused or unavailable (a
+model without fans, Virtual DSM, a service that is not installed, a
+missing privilege), the adapter logs one WARN naming the endpoint, keeps
+collecting everything else, and skips only what depends on it, never
+publishing a placeholder value:
+
+| Optional endpoint | Skipped while it is not readable |
+|---|---|
+| `SYNO.Core.Hardware.FanSpeed` | DiskStation `Fan` properties |
+| `SYNO.Core.FileServ.NFS` | DiskStation `NFS` service enabled properties |
+| `SYNO.Core.ISCSI.LUN` | iSCSI LUN objects (existing ones go ERROR), their Volume and Datastore relationships |
+| `SYNO.Core.ISCSI.Target` | iSCSI LUN target IQN, enabled and portal properties |
+| `SYNO.Core.Network.Interface` | DiskStation NIC count, the NFS export Datastore cross-link |
+| `SYNO.Core.CurrentConnection` | NFS client counts (DiskStation and NFS export) |
+| `SYNO.Core.Share` | NFS export objects (existing ones go ERROR), their Volume and Datastore relationships |
+| `SYNO.Core.FileServ.NFS.SharePrivilege` (per share) | that share as an NFS export |
+| `SYNO.Core.ExternalDevice.UPS` | the UPS object |
+
+The UPS read and the per-share NFS rule probe keep their build 30
+logging: an INFO each cycle for UPS, a WARN each cycle per share whose
+probe fails.
+
+While the iSCSI LUN list or the share list cannot be read, no Volume
+relationships are refreshed (a Volume's LUN, NFS export and SSD cache
+edges stay as they were), so a temporary failure does not detach them.
 
 > **Session note:** the adapter manages its own DSM session. It logs in to
 > obtain a `_sid` session token, passes `_sid` on every Web API call, and
@@ -94,6 +133,11 @@ for:
 - **Test Connection fails on TLS**: the NAS certificate is untrusted
   (see TLS above). Import the certificate, or set `allowInsecure=true`
   only if you accept an unvalidated connection.
+- **The adapter log has `Optional DSM endpoint ... is not readable`**
+  (build 31+). That endpoint was refused or is not offered by this model
+  or DSM edition; see the optional endpoint table above for what is
+  skipped. The WARN is logged once per instance configuration, and an INFO
+  is logged when the endpoint becomes readable again.
 - **A resource shows ERROR with no metrics** — DSM returned a
   success-shaped but empty payload for a critical endpoint; the adapter
   surfaces this as ERROR rather than publishing `0.0` sentinels. Verify the

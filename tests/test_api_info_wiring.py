@@ -26,13 +26,20 @@ def body(sig):
 
 def main():
     login = body(r"private String sendLogin\(\)")
-    assert re.search(r"if \(!apis\.loaded\(\)\)\s*\{\s*loadApiInfo\(\);", login), \
-        "the login does not load SYNO.API.Info first"
+    assert re.search(r"if \(!apiInfoAsked\)\s*\{\s*loadApiInfo\(\);", login), \
+        "the login does not load SYNO.API.Info first (once per client)"
     info = body(r"private void loadApiInfo\(\)")
     assert "catch (InterruptedException ie)" in info and "throw ie;" in info
     assert "SynologyFailures.isUnreachable(e)" in info, "unreachable is not rethrown"
-    assert re.search(r"if \(!apiInfoWarned\)\s*\{\s*apiInfoWarned = true;", info), \
-        "the fallback WARN is not once per client"
+    # Review N6: answered once per client, fallback included; an
+    # unreachable NAS is rethrown before the flag is set.
+    unreach = info.index("SynologyFailures.isUnreachable(e)")
+    assert info.count("apiInfoAsked = true;") == 2, "the asked flag is not set on both paths"
+    assert info.index("apiInfoAsked = true;") > unreach, \
+        "an unreachable NAS marks SYNO.API.Info as asked"
+    # Review W4: a lowered version is a WARN.
+    assert re.search(r"if \(!found\.lowered\.isEmpty\(\)\)\s*\{\s*log\.warn\(", info), \
+        "a lowered API version is not logged at WARN"
     assert re.search(r"\breturn;\s*\}", info), "a failed SYNO.API.Info must return, not throw"
     assert '"/webapi/entry.cgi' not in SRC, "a hardcoded entry.cgi URL is left"
     assert "apis.pick(api, version)" in SRC, "data calls do not use the pick"

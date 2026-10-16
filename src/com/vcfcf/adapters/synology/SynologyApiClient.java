@@ -52,8 +52,12 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	 * SYNO.API.Info at the first login; see {@link DsmApis}.
 	 */
 	private final DsmApis apis = new DsmApis();
-	/** Build 32 (issue #31): the SYNO.API.Info fallback WARN is logged once per client. */
-	private volatile boolean apiInfoWarned;
+	/**
+	 * Build 32 (issue #31, review N6): SYNO.API.Info answered (read, or
+	 * failed for a reason other than an unreachable NAS) for this client,
+	 * so it is not asked again; one client per configuration.
+	 */
+	private volatile boolean apiInfoAsked;
 
 	public SynologyApiClient(ManagedHttpClient http, String username,
 			String password, String sessionName, Logger log) {
@@ -88,8 +92,9 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	}
 
 	private String sendLogin() throws IOException, InterruptedException {
-		// Build 32 (issue #31): learn the API versions first (once).
-		if (!apis.loaded()) {
+		// Build 32 (issue #31): learn the API versions first, once per
+		// client (review N6: not again at each re-login while unread).
+		if (!apiInfoAsked) {
 			loadApiInfo();
 		}
 		String path = synoUrl(DsmApis.AUTH, 7, "login",
@@ -119,8 +124,10 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	 * which version and CGI path each API this adapter uses is offered at,
 	 * so {@link #call} uses {@code min(maxVersion, desired)}. Never fails the
 	 * login: any failure but an unreachable NAS leaves the built-in versions
-	 * (build 31) in use, with one WARN per client, and is tried again at the
-	 * next login. An unreachable NAS (connect failure, timeout) is rethrown:
+	 * (build 31) in use, with one WARN, and is not asked again by this
+	 * client (review N6; an edit builds a new client, which asks again). An
+	 * unreachable NAS (connect failure, timeout) is rethrown, and the next
+	 * login asks again:
 	 * the login would fail the same way, and waiting out a second set of
 	 * timeouts for it would double the cost of a down NAS.
 	 */
@@ -135,21 +142,29 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 			if (SynologyFailures.isUnreachable(e)) {
 				throw e;
 			}
-			if (!apiInfoWarned) {
-				apiInfoWarned = true;
-				log.warn("SYNO.API.Info is not readable ("
-						+ redact(SynologyFailures.describe(e)) + "); using the "
-						+ "adapter's built-in DSM API versions (DSM 7.2 or later). "
-						+ "Logged once; tried again at each login.");
-			}
+			apiInfoAsked = true;
+			log.warn("SYNO.API.Info is not readable ("
+					+ redact(SynologyFailures.describe(e)) + "); using the "
+					+ "adapter's built-in DSM API versions (DSM 7.2 or later). "
+					+ "Not asked again until the instance is edited.");
 			return;
 		}
+		apiInfoAsked = true;
 		if (!found.missingRequired.isEmpty()) {
 			log.warn("This DSM does not offer the required API(s) "
 					+ found.missingRequired + " (per SYNO.API.Info), so nothing "
 					+ "can be collected from it. The adapter supports DSM 7.2 or "
 					+ "later. They are still tried, so the NAS's own answer is "
 					+ "what the collection error shows.");
+		}
+		// Review W4: an older API version may return an older payload that
+		// lacks fields this adapter reads, so a lowered version is a WARN.
+		if (!found.lowered.isEmpty()) {
+			log.warn("This DSM offers only older versions of " + found.lowered
+					+ " (per SYNO.API.Info); the adapter uses them, but values "
+					+ "from these APIs are unverified: a field the older version "
+					+ "does not return is skipped or, for some keys, reads 0. The "
+					+ "adapter is tested on DSM 7.2 or later.");
 		}
 		log.info("SYNO.API.Info read: "
 				+ (found.lowered.isEmpty() ? "every API at its desired version"

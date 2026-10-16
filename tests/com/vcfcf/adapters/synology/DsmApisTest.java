@@ -22,6 +22,7 @@ public final class DsmApisTest {
 		missingApisAreNamedAndStillTried();
 		badResponsesLeaveTheTableUnread();
 		pathsAreSanitised();
+		desiredBelowMinVersionIsMissing();
 		System.out.println("DsmApisTest: all assertions passed");
 	}
 
@@ -131,5 +132,24 @@ public final class DsmApisTest {
 		DsmApis a = new DsmApis();
 		a.load(MAPS, resp);
 		T.eq("entry.cgi v7", a.pick(DsmApis.AUTH, 7).toString(), "unsafe path ignored");
+	}
+
+	/** Review N2: a DSM whose minVersion is above the desired version. */
+	@SuppressWarnings("unchecked")
+	static void desiredBelowMinVersionIsMissing() {
+		Map<String, Object> resp = table(7, 2, 3);
+		Map<String, Object> data = (Map<String, Object>) resp.get("data");
+		data.put(SnapshotReads.STORAGE, entry("entry.cgi", 2, 4));
+		data.put(SnapshotReads.FAN, entry("entry.cgi", 3, 3));
+		DsmApis a = new DsmApis();
+		DsmApis.Load l = a.load(MAPS, resp);
+		T.eq(java.util.Arrays.asList(SnapshotReads.STORAGE
+				+ " (offered from v2; adapter written for v1)"), l.missingRequired,
+				"required, named with the versions");
+		T.eq(java.util.Arrays.asList(SnapshotReads.FAN
+				+ " (offered from v3; adapter written for v1)"), l.missingOptional,
+				"optional, named with the versions");
+		T.eq("entry.cgi v1", a.pick(SnapshotReads.STORAGE, 1).toString(),
+				"called the build 31 way, never below DSM's minimum silently");
 	}
 }

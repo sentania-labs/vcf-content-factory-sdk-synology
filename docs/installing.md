@@ -9,8 +9,12 @@
   (`SYNO.API.Info`) which version of each Web API it offers and uses the
   lower of that and the version the adapter was written for, so a DSM
   that offers only older versions is called with those; DSM 6.x and
-  DSM 7.0 to 7.1 are not tested. If DSM does not list a required API, the
-  adapter log says so once. If `SYNO.API.Info` cannot be read, the adapter
+  DSM 7.0 to 7.1 are not tested. An older API version can return an
+  older payload without some fields the adapter reads; such a field is
+  skipped or, for some keys, reads 0, and the adapter log names the APIs
+  in use at an older version with one WARN. If DSM does not list a
+  required API, or offers it only at versions newer than the adapter's,
+  the adapter log says so once. If `SYNO.API.Info` cannot be read, the adapter
   uses its built-in versions (one WARN) and the login goes ahead.
 - Network reachability from the VCF Operations collector to the NAS on
   **TCP 5001** (DSM HTTPS Web API).

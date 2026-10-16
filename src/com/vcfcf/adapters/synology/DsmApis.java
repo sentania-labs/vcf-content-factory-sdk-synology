@@ -101,9 +101,9 @@ final class DsmApis {
 
 	/** What one load found, for the client's log lines. */
 	static final class Load {
-		/** Required APIs DSM does not list. */
+		/** Required APIs DSM does not list, or offers only above the desired version. */
 		final List<String> missingRequired = new ArrayList<>();
-		/** Optional APIs DSM does not list. */
+		/** Optional APIs DSM does not list, or offers only above the desired version. */
 		final List<String> missingOptional = new ArrayList<>();
 		/** APIs called below their desired version, "api vN (desired vM)". */
 		final List<String> lowered = new ArrayList<>();
@@ -145,8 +145,17 @@ final class DsmApis {
 			String path = js.str(js.get(e, "path"));
 			Entry entry = new Entry(safeCgi(path) ? path : ENTRY_CGI,
 					min == null ? 1 : min.intValue(), max.intValue());
-			t.put(d.getKey(), entry);
 			int v = Math.min(entry.maxVersion, d.getValue());
+			if (v < entry.minVersion) {
+				// Review N2: DSM no longer offers any version this adapter
+				// was written for. Counted as missing (named in the summary)
+				// and called the build 31 way, so the NAS's answer decides.
+				(isRequired(d.getKey()) ? out.missingRequired : out.missingOptional)
+						.add(d.getKey() + " (offered from v" + entry.minVersion
+								+ "; adapter written for v" + d.getValue() + ")");
+				continue;
+			}
+			t.put(d.getKey(), entry);
 			if (v < d.getValue()) {
 				out.lowered.add(d.getKey() + " v" + v + " (desired v" + d.getValue() + ")");
 			}

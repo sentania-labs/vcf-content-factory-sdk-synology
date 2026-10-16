@@ -219,7 +219,7 @@ for:
 | Username | `username` | Yes | — | DSM account with API access. |
 | Password | `password` | Yes | — | DSM account password (masked). |
 | VCF Ops Suite API URL | `vrops_url` | No | blank | Remote collector or Cloud Proxy only: the primary or analytics node FQDN (a full URL, a bare host or `host:port`). Used only when the username and password below are both set. |
-| VCF Ops Suite API Username | `vrops_username` | No | blank | Remote collector only: a VCF Operations account that can read VMWARE Datastores. The adapter's own log lines do not name it, but the shared framework Suite API client still logs the account name at INFO on every configure on this path, until the framework is fixed (factory issue pending). |
+| VCF Ops Suite API Username | `vrops_username` | No | blank | Remote collector only: a VCF Operations account that can read VMWARE Datastores. The adapter's own log lines do not name it, but the shared framework Suite API client still logs the account name at INFO on every configure on this path, until the framework is fixed (sentania-labs/vcf-content-factory#227). |
 | VCF Ops Suite API Password | `vrops_password` | No | blank | Remote collector only (masked). |
 
 Username, password and the three Suite API fields are on the

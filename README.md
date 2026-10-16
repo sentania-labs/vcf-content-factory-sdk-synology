@@ -32,7 +32,7 @@ Synology storage health.
 
 ## Install
 
-1. Open VCF Operations and go to **Administration > Integrations > Repository** (9.x; on 8.x, **Data Sources > Integrations > Repository**)
+1. Open VCF Operations and go to **Data Sources > Integrations > Repository** (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**)
 2. Click **Add**
 3. Select the `.pak` file from this package
 4. Accept the EULA and wait for installation to complete (~30 seconds)
@@ -41,7 +41,7 @@ Synology storage health.
 
 After installation, create an adapter instance:
 
-1. Go to **Administration > Integrations > Accounts** (9.x; on 8.x, **Data Sources > Integrations > Accounts**)
+1. Go to **Data Sources > Integrations > Accounts** (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**)
 2. Click **Add Account** and select **VCF Content Factory Synology DiskStation**
 3. Fill in:
    - **Host / IP Address**: Your NAS hostname or IP (e.g., `storage.example.com`)

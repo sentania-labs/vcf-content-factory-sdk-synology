@@ -262,7 +262,7 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 		HttpResponse<String> resp;
 		try {
 			resp = via.get(path, HttpResponse.BodyHandlers.ofString());
-		} catch (IOException e) {
+		} catch (IOException | RuntimeException e) {
 			// DEF-001: a transport failure (connect/SSL/timeout) can throw BEFORE
 			// any response, and the underlying message may embed the request URI —
 			// which on login carries account=/passwd=<plaintext> and on every
@@ -273,9 +273,11 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 			// Build 31 (issue #13): keep the failure's class (connect, timeout,
 			// other) as a field instead, so an unreachable NAS maps to DOWN and
 			// a connect failure stops the snapshot build.
-			throw new SynologyTransportException("transport error calling "
-					+ endpoint + ": " + redact(String.valueOf(e.getMessage())),
-					SynologyFailures.classifyTransport(e));
+			// Build 32 (issue #17): runtime exceptions from the HTTP layer
+			// (IllegalArgumentException from URI construction,
+			// UncheckedIOException) get the same treatment; before they escaped
+			// with their raw message. InterruptedException is not caught here.
+			throw SynologyRedaction.transportFailure(endpoint, e);
 		}
 		if (resp.statusCode() != 200) {
 			throw new IOException("HTTP " + resp.statusCode() + " from " + endpoint);
@@ -293,11 +295,8 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	 * left intact so the message still identifies the failing endpoint.
 	 */
 	static String redact(String path) {
-		if (path == null) return "";
-		return path
-				.replaceAll("(?i)(_sid=)[^&]*", "$1<redacted>")
-				.replaceAll("(?i)(passwd=)[^&]*", "$1<redacted>")
-				.replaceAll("(?i)(account=)[^&]*", "$1<redacted>");
+		// Build 32 (issue #17): one implementation, SDK-free and unit tested.
+		return SynologyRedaction.redact(path);
 	}
 
 	private String synoUrl(String api, int version, String method, String... extra) {

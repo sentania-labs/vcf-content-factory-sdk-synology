@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.0.32 (Unreleased)
+
+Dev preview build 32 (`build-sdk` stamps 0.0.0.32); the 1.0.0 release line
+is unchanged until a `v1.0.0.32` tag. The factory brief is
+knowledge/designs/sdk-adapters/synology-build-32-correctness-and-hygiene.md.
+Out of scope here: #11, #16, #32, #35. Issues #33 and #26 were already
+closed by build 31 (see the build 31 entries for #13); no change.
+
+- fix(adapter): build 32, issue #17: **a runtime exception from the HTTP layer no longer escapes with the raw request URI in its message.** `callRaw` now catches `RuntimeException` (an `IllegalArgumentException` from URI construction, an `UncheckedIOException`) as well as `IOException` and rethrows a `SynologyTransportException` built only from the endpoint label, the exception's simple class name and the redacted message, with no chained cause, so `passwd=`, `account=` and `_sid=` cannot reach the adapter log or a Test Connection error. The failure class is kept, so a wrapped connect failure is still DOWN. Redaction moved to the SDK-free `SynologyRedaction` (same patterns). Tests: RedactionTest.
+
 ## 0.0.0.31 (Unreleased)
 
 Dev preview build 31 (`build-sdk` stamps 0.0.0.31); the 1.0.0 release line

@@ -53,9 +53,14 @@ unread, and the framework logs its own line for each of them:
 | `SYNO.Core.FileServ.NFS.SharePrivilege` (per share) | that share's NFS rules: an existing NFS export on it goes ERROR (no `rule_count` or `allowed_clients` is published), the relationships of the Volume that share sits on are left unchanged (other Volumes still refresh), and a share not yet known as an export is not discovered until its probe succeeds |
 | `SYNO.Core.ExternalDevice.UPS` | the UPS object |
 
-The UPS read and the per-share NFS rule probe keep their build 30
-logging: an INFO each cycle for UPS, a WARN each cycle per share whose
-probe fails.
+The UPS read keeps its build 30 logging: an INFO each cycle. The
+per-share NFS rule probe (build 32) runs only while the NFS service is
+on: when `SYNO.Core.FileServ.NFS` reports NFS off, no share is probed, no
+share is an NFS export, and an existing NFS export object publishes no
+`rule_count` or `allowed_clients`. While NFS is on, a share's answer is
+reused for up to 15 minutes before every share is probed again (a new
+share is probed at once); a share whose probe fails is probed again each
+cycle and logs its WARN at most once an hour while it keeps failing.
 
 While the iSCSI LUN list or the share list cannot be read, no Volume
 relationships are refreshed (a Volume's LUN, NFS export and SSD cache

@@ -148,6 +148,16 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	private static final Duration LOGOUT_TIMEOUT = Duration.ofSeconds(5);
 
 	/**
+	 * Build 32 (issue #20): a share's NFS rule probe answer is reused for
+	 * at most this long; then every share is probed again. NFS rules change
+	 * rarely; a new share is probed at once.
+	 */
+	private static final long NFS_RULES_REFRESH_MS = 15L * 60_000L;
+
+	/** Build 32 (issue #20): at most one failed-probe WARN per share per this long. */
+	private static final long NFS_PROBE_WARN_EVERY_MS = 60L * 60_000L;
+
+	/**
 	 * One configuration's DSM API client, snapshot cache, the snapshot
 	 * cache's logger and optional-endpoint WARN state (build 31, issue #14)
 	 * (immutable). The logger is resolved once in configureAdapter and
@@ -160,13 +170,17 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		final Logger snapshotLog;
 		final SnapshotCache<Snapshot> snapshots;
 		final SnapshotReads reads;
+		/** Build 32 (issue #20): this configuration's remembered NFS probes. */
+		final NfsProbes.Cached<SimpleJson> nfsProbes;
 
 		Configured(SynologyApiClient api, Logger snapshotLog,
-				SnapshotCache<Snapshot> snapshots, SnapshotReads reads) {
+				SnapshotCache<Snapshot> snapshots, SnapshotReads reads,
+				NfsProbes.Cached<SimpleJson> nfsProbes) {
 			this.api = api;
 			this.snapshotLog = snapshotLog;
 			this.snapshots = snapshots;
 			this.reads = reads;
+			this.nfsProbes = nfsProbes;
 		}
 	}
 
@@ -233,7 +247,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 						MAX_SNAPSHOT_AGE_MS, FAILURE_RETRY_BACKOFF_MS,
 						AUTH_FAILURE_BACKOFF_MS, MAX_AUTH_FAILURE_BACKOFF_MS,
 						snapshotLog::debug),
-				new SnapshotReads());
+				new SnapshotReads(),
+				new NfsProbes.Cached<>(System::currentTimeMillis,
+						NFS_RULES_REFRESH_MS, NFS_PROBE_WARN_EVERY_MS));
 
 		// Optional Datastore cross-link transport (build 16; explicit-creds
 		// branch build 21). Two paths, selected by config:
@@ -700,7 +716,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 		// Review NIT-3: the login runs inside the read plan, after its own
 		// abort check (SnapshotReads.read), not before the first checkpoint.
-		return c.snapshots.get(() -> Snapshot.build(c.api, c.reads, this),
+		return c.snapshots.get(() -> Snapshot.build(c.api, c.reads, c.nfsProbes, this),
 				this::logWarn);
 	}
 
@@ -1108,16 +1124,20 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				share.get("enable_share_cow").asBoolean() ? "true" : "false");
 		prop(out, "Access|compress_enabled",
 				share.get("enable_share_compress").asBoolean() ? "true" : "false");
-		prop(out, "Access|rule_count", String.valueOf(ruleCount));
+		// Build 32 (issue #20): with the NFS service off no share was
+		// probed, so the rule keys are skipped, never rule_count = 0.
+		if (!s.nfsDisabled) {
+			prop(out, "Access|rule_count", String.valueOf(ruleCount));
 
-		StringBuilder clients = new StringBuilder();
-		if (rules != null) {
-			for (SimpleJson rule : rules.data().get("rule").asList()) {
-				if (clients.length() > 0) clients.append(", ");
-				clients.append(rule.get("client").asString(""));
+			StringBuilder clients = new StringBuilder();
+			if (rules != null) {
+				for (SimpleJson rule : rules.data().get("rule").asList()) {
+					if (clients.length() > 0) clients.append(", ");
+					clients.append(rule.get("client").asString(""));
+				}
 			}
+			prop(out, "Access|allowed_clients", clients.toString());
 		}
-		prop(out, "Access|allowed_clients", clients.toString());
 
 		metric(out, "Capacity|size_used_mib", share.get("share_quota_used").asDouble());
 		metric(out, "Capacity|size_logical_mib",
@@ -1443,8 +1463,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		 */
 		final Map<String, String> nfsProbeFailed = new java.util.LinkedHashMap<>();
 		final Map<String, Integer> nfsClientsByShare = new HashMap<>();
+		/**
+		 * Build 32 (issue #20): the NFS service reported itself off, so no
+		 * share was probed: no share is an export this cycle, and an existing
+		 * export object publishes no rule keys (its rules were not read).
+		 */
+		boolean nfsDisabled;
 
 		static Snapshot build(SynologyApiClient api, SnapshotReads reads,
+				NfsProbes.Cached<SimpleJson> nfsProbes,
 				SynologyAdapter adapter) throws Exception {
 			Snapshot s = new Snapshot();
 			// Build 31: SnapshotReads logs in if needed and runs the abort
@@ -1506,7 +1533,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				adapter.logInfo("Snapshot: UPS not available: " + e.getMessage());
 			}
 
-			s.buildLookups(api, adapter);
+			s.buildLookups(api, nfsProbes, adapter);
 
 			int poolCount = s.storage.data().get("storagePools").asList().size();
 			int volCount = s.storage.data().get("volumes").asList().size();
@@ -1529,7 +1556,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			return s;
 		}
 
-		private void buildLookups(SynologyApiClient api, SynologyAdapter adapter)
+		private void buildLookups(SynologyApiClient api,
+				NfsProbes.Cached<SimpleJson> nfsProbes, SynologyAdapter adapter)
 				throws Exception {
 			SimpleJson diskUtil = utilization.data().get("disk");
 			if (!diskUtil.isNull()) {
@@ -1569,16 +1597,27 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			// is recorded in nfsProbeFailed (review B2), so an existing export
 			// on it is ERROR and Volume edges are left unchanged this cycle.
 			// See NfsProbes.
-			List<String> shareNames = new ArrayList<>();
-			for (SimpleJson share : shares.data().get("shares").asList()) {
-				shareNames.add(share.get("name").asString());
+			// Build 32 (issue #20): no probe at all while the NFS service
+			// reports itself off (a share cannot be an NFS export then), and
+			// otherwise a share's answer is reused for up to 15 minutes, with
+			// failed-probe WARNs at most hourly per share (NfsProbes.Cached).
+			if (NfsProbes.serviceOff(isRead(SnapshotReads.NFS_SERVICE),
+					nfsService.data().get("enable_nfs").isNull(),
+					nfsService.data().get("enable_nfs").asBoolean())) {
+				nfsDisabled = true;
+				nfsProbes.clear();
+			} else {
+				List<String> shareNames = new ArrayList<>();
+				for (SimpleJson share : shares.data().get("shares").asList()) {
+					shareNames.add(share.get("name").asString());
+				}
+				NfsProbes.Result<SimpleJson> probes = nfsProbes.run(shareNames,
+						api::nfsSharePrivilege,
+						rules -> rules.data().get("rule").size(),
+						adapter::checkpoint, adapter::logWarn);
+				nfsRulesByShare.putAll(probes.rulesByShare);
+				nfsProbeFailed.putAll(probes.failed);
 			}
-			NfsProbes.Result<SimpleJson> probes = NfsProbes.run(shareNames,
-					api::nfsSharePrivilege,
-					rules -> rules.data().get("rule").size(),
-					adapter::checkpoint, adapter::logWarn);
-			nfsRulesByShare.putAll(probes.rulesByShare);
-			nfsProbeFailed.putAll(probes.failed);
 			for (SimpleJson conn : connections.data().get("items").asList()) {
 				if ("NFS".equals(conn.get("protocol").asString())) {
 					String descr = conn.get("descr").asString("");

@@ -41,8 +41,8 @@ Synology storage health.
 
 After installation, create an adapter instance:
 
-1. Go to **Administration → Solutions → VCF Content Factory Synology DiskStation**
-2. Click **Configure** → **Add Adapter Instance**
+1. Go to **Administration > Integrations > Accounts** (VCF Operations 9.x)
+2. Click **Add Account** and select **VCF Content Factory Synology DiskStation**
 3. Fill in:
    - **Host / IP Address**: Your NAS hostname or IP (e.g., `storage.example.com`)
    - **Port**: HTTPS port (default `5001`)

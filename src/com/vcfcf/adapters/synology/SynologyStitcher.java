@@ -116,6 +116,12 @@ public final class SynologyStitcher {
 			if (entries != null) {
 				for (ForeignResourceResolver.ResourceEntry e : entries) {
 					if (e == null) continue;
+					// Review N3: a row returned twice across a page boundary
+					// is counted and indexed once (round 2: the count too).
+					if (!DatastoreIndex.firstSighting(seen, "", e.name,
+							e.identifiers)) {
+						continue;
+					}
 					total++;
 					ResourceKey key = new ResourceKey(e.name, e.resourceKind,
 							e.adapterKind);
@@ -130,11 +136,7 @@ public final class SynologyStitcher {
 							pathVal = id[1];
 						}
 					}
-					// Review N3: a row returned twice across a page boundary
-					// is indexed once.
-					if (pathVal != null && !pathVal.isEmpty()
-							&& DatastoreIndex.firstSighting(seen, pathVal, e.name,
-									e.identifiers)) {
+					if (pathVal != null && !pathVal.isEmpty()) {
 						index.computeIfAbsent(pathVal, k -> new ArrayList<>())
 								.add(key);
 					}

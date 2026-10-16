@@ -34,10 +34,11 @@ final class DatastoreIndex {
 	}
 
 	/**
-	 * Review N3: whether this identity was already indexed under this path.
-	 * A row shifted across a page boundary while the list changes can come
-	 * back twice; it is indexed once, so no Datastore gets the same child
-	 * twice.
+	 * Review N3: whether this identity was already seen under this key
+	 * ({@code path}; the stitcher passes "" to dedupe whole rows). A row
+	 * shifted across a page boundary while the list changes can come back
+	 * twice; it is counted and indexed once, so no Datastore gets the same
+	 * child twice.
 	 */
 	static boolean firstSighting(java.util.Set<String> seen, String path,
 			String name, List<String[]> identifiers) {

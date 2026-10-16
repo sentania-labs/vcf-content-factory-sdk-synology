@@ -7,6 +7,8 @@
 - W3 (issue #17, DEF-001): both callRaw overloads route IOException and
   RuntimeException through SynologyRedaction.transportFailure, and no
   other catch of the HTTP call exists.
+- Round 2 (R13, R14): the Datastore duplicate-row filter runs before the
+  count and the index; memory_usage_pct uses SynologyMetrics.memoryUsagePct.
 Stdlib only; run from anywhere (ci/run_java_tests.sh runs it).
 """
 import pathlib
@@ -16,6 +18,7 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 PKG = ROOT / "src/com/vcfcf/adapters/synology"
 ADAPTER = (PKG / "SynologyAdapter.java").read_text()
 CLIENT = (PKG / "SynologyApiClient.java").read_text()
+STITCHER = (PKG / "SynologyStitcher.java").read_text()
 
 
 def body(src, sig):
@@ -46,6 +49,22 @@ def main():
     short = body(CLIENT, r"private SimpleJson callRaw\(String path, String endpoint\)")
     assert "return callRaw(http, path, endpoint);" in short, \
         "the short callRaw overload does not delegate"
+    # Round 2 R13 (issue #28, review N3): duplicate rows are skipped before
+    # they are counted or indexed.
+    load = body(STITCHER, r"public int loadDatastores\(\)")
+    dedupe = re.search(r"if \(!DatastoreIndex\.firstSighting\(seen, \"\", e\.name,\s*"
+                       r"e\.identifiers\)\)\s*\{\s*continue;\s*\}", load)
+    assert dedupe, "loadDatastores does not skip duplicate rows"
+    assert dedupe.start() < load.index("total++;") < load.index("index.computeIfAbsent"), \
+        "duplicate rows are counted or indexed before the filter"
+
+    # Round 2 R14 (issue #18, review N7): memory_usage_pct goes through the
+    # helper that needs a positive total, and only when present.
+    assert re.search(r"metricIfPresent\(out, \"Memory\|memory_usage_pct\",\s*"
+                     r"SynologyMetrics\.memoryUsagePct\(SJ, mem\)\);", ADAPTER), \
+        "memory_usage_pct is not published through memoryUsagePct"
+    assert ADAPTER.count("\"Memory|memory_usage_pct\"") == 1, \
+        "memory_usage_pct is published somewhere else too"
     print("test_collect_wiring: all assertions passed")
 
 

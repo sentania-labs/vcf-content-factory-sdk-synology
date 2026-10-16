@@ -24,6 +24,7 @@ def main():
     assert m, "sendLogout not found"
     body = m.group(1)
     assert re.search(r"synoUrl\(sid,", body), "logout does not pass this client's _sid"
+    assert "urlEncode(sessionName)" in body.replace("\n", " "), "logout session name"
     assert "urlEncode(sessionName)" in body, "logout does not name this client's session"
     assert re.search(r"sessionName\(instanceId,\s*false,", ADAPTER), \
         "configure does not name the session after the instance"

@@ -4,7 +4,14 @@
 
 - VCF Operations 8.x or 9.x (collect-path discovery is validated on
   9.0.2).
-- A Synology DiskStation running **DSM 7.2 or later**.
+- A Synology DiskStation running **DSM 7.2 or later** (developed and
+  tested against DSM 7.3.2). At its first login the adapter asks DSM
+  (`SYNO.API.Info`) which version of each Web API it offers and uses the
+  lower of that and the version the adapter was written for, so a DSM
+  that offers only older versions is called with those; DSM 6.x and
+  DSM 7.0 to 7.1 are not tested. If DSM does not list a required API, the
+  adapter log says so once. If `SYNO.API.Info` cannot be read, the adapter
+  uses its built-in versions (one WARN) and the login goes ahead.
 - Network reachability from the VCF Operations collector to the NAS on
   **TCP 5001** (DSM HTTPS Web API).
 - A **dedicated DSM account in the administrators group**, used only by

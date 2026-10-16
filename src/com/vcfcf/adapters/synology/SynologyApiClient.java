@@ -47,6 +47,13 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	 * per Test Connection); see {@link SynologyConfig#sessionName}.
 	 */
 	private final String sessionName;
+	/**
+	 * Build 32 (issue #31): the CGI path and version per API, from
+	 * SYNO.API.Info at the first login; see {@link DsmApis}.
+	 */
+	private final DsmApis apis = new DsmApis();
+	/** Build 32 (issue #31): the SYNO.API.Info fallback WARN is logged once per client. */
+	private volatile boolean apiInfoWarned;
 
 	public SynologyApiClient(ManagedHttpClient http, String username,
 			String password, String sessionName, Logger log) {
@@ -81,7 +88,11 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	}
 
 	private String sendLogin() throws IOException, InterruptedException {
-		String path = synoUrl("SYNO.API.Auth", 7, "login",
+		// Build 32 (issue #31): learn the API versions first (once).
+		if (!apis.loaded()) {
+			loadApiInfo();
+		}
+		String path = synoUrl(DsmApis.AUTH, 7, "login",
 				"account=" + urlEncode(username),
 				"passwd=" + urlEncode(password),
 				"session=" + urlEncode(sessionName),
@@ -101,6 +112,50 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 		String sid = resp.data().get("sid").asString();
 		log.info("Synology login succeeded, session=" + sessionName);
 		return sid;
+	}
+
+	/**
+	 * Build 32 (issue #31): asks {@code SYNO.API.Info} (no session needed)
+	 * which version and CGI path each API this adapter uses is offered at,
+	 * so {@link #call} uses {@code min(maxVersion, desired)}. Never fails the
+	 * login: any failure but an unreachable NAS leaves the built-in versions
+	 * (build 31) in use, with one WARN per client, and is tried again at the
+	 * next login. An unreachable NAS (connect failure, timeout) is rethrown:
+	 * the login would fail the same way, and waiting out a second set of
+	 * timeouts for it would double the cost of a down NAS.
+	 */
+	private void loadApiInfo() throws IOException, InterruptedException {
+		DsmApis.Load found;
+		try {
+			found = apis.load(SynologyAdapter.SJ,
+					callRaw(DsmApis.INFO_PATH, "SYNO.API.Info query"));
+		} catch (InterruptedException ie) {
+			throw ie;
+		} catch (Exception e) {
+			if (SynologyFailures.isUnreachable(e)) {
+				throw e;
+			}
+			if (!apiInfoWarned) {
+				apiInfoWarned = true;
+				log.warn("SYNO.API.Info is not readable ("
+						+ redact(SynologyFailures.describe(e)) + "); using the "
+						+ "adapter's built-in DSM API versions (DSM 7.2 or later). "
+						+ "Logged once; tried again at each login.");
+			}
+			return;
+		}
+		if (!found.missingRequired.isEmpty()) {
+			log.warn("This DSM does not offer the required API(s) "
+					+ found.missingRequired + " (per SYNO.API.Info), so nothing "
+					+ "can be collected from it. The adapter supports DSM 7.2 or "
+					+ "later. They are still tried, so the NAS's own answer is "
+					+ "what the collection error shows.");
+		}
+		log.info("SYNO.API.Info read: "
+				+ (found.lowered.isEmpty() ? "every API at its desired version"
+						: "older versions in use: " + found.lowered)
+				+ (found.missingOptional.isEmpty() ? ""
+						: "; not offered (optional): " + found.missingOptional));
 	}
 
 	/** Logs the session out (if any); the client stays usable. */
@@ -123,8 +178,9 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 		try {
 			// Build 32 (issue #23): this client's own session name, and its
 			// _sid (synoUrl adds it), so only this client's session ends.
-			callRaw(logoutHttp, synoUrl(sid, "SYNO.API.Auth", 7, "logout",
-					"session=" + urlEncode(sessionName)), "SYNO.API.Auth logout");
+			callRaw(logoutHttp, synoUrl(sid, apis.pick(DsmApis.AUTH, 7),
+					DsmApis.AUTH, "logout", "session=" + urlEncode(sessionName)),
+					"SYNO.API.Auth logout");
 		} catch (InterruptedException ie) {
 			Thread.currentThread().interrupt();
 			log.warn("Logout interrupted (non-fatal)");
@@ -305,14 +361,19 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 		return SynologyRedaction.redact(path);
 	}
 
+	/**
+	 * Build 32 (issue #31): {@code version} is the desired version; the URL
+	 * carries {@code min(maxVersion, version)} on DSM's CGI path once
+	 * SYNO.API.Info was read ({@link DsmApis#pick}).
+	 */
 	private String synoUrl(String api, int version, String method, String... extra) {
-		return synoUrl(session.sid(), api, version, method, extra);
+		return synoUrl(session.sid(), apis.pick(api, version), api, method, extra);
 	}
 
-	private static String synoUrl(String sid, String api, int version,
+	private static String synoUrl(String sid, DsmApis.Pick pick, String api,
 			String method, String... extra) {
-		StringBuilder sb = new StringBuilder("/webapi/entry.cgi?api=");
-		sb.append(api).append("&version=").append(version).append("&method=").append(method);
+		StringBuilder sb = new StringBuilder("/webapi/").append(pick.cgi).append("?api=");
+		sb.append(api).append("&version=").append(pick.version).append("&method=").append(method);
 		if (sid != null) {
 			sb.append("&_sid=").append(sid);
 		}

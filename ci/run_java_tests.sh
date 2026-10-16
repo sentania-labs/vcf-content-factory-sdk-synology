@@ -25,3 +25,4 @@ python3 tests/test_suite_api_log_redaction.py
 python3 tests/test_session_name_wiring.py
 python3 tests/test_describe_units.py
 python3 tests/test_api_info_wiring.py
+python3 tests/test_collect_wiring.py

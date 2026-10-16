@@ -14,6 +14,7 @@ import java.util.Map;
 public final class SnapshotIsolationTest {
 
 	public static void main(String[] args) throws Exception {
+		nfsOffMakesExportsError();
 		eachKindNeedsItsOwnList();
 		unreadListMakesItsObjectsError();
 		volumeChildrenFrozenWhileAListIsUnread();
@@ -162,5 +163,18 @@ public final class SnapshotIsolationTest {
 		T.eq(a, SnapshotIsolation.replaced(a, b), "replaced: released");
 		T.eq(null, SnapshotIsolation.replaced(a, a), "still in use: kept");
 		T.eq(null, SnapshotIsolation.replaced(null, b), "nothing before: nothing");
+	}
+
+	/** Build 32 (issue #20, review W1): NFS off makes an existing export ERROR. */
+	static void nfsOffMakesExportsError() throws Exception {
+		SnapshotIsolation.requireNfsService(false, "vmware");
+		try {
+			SnapshotIsolation.requireNfsService(true, "vmware");
+			throw new AssertionError("an export must be ERROR while NFS is off");
+		} catch (java.io.IOException e) {
+			T.check(e.getMessage().contains("NFS service is off")
+					&& e.getMessage().contains("vmware"),
+					"the reason names the cause and the share: " + e.getMessage());
+		}
 	}
 }

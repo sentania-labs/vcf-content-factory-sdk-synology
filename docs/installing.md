@@ -84,9 +84,13 @@ unread, and the framework logs its own line for each of them:
 
 The UPS read keeps its build 30 logging: an INFO each cycle. The
 per-share NFS rule probe (build 32) runs only while the NFS service is
-on: when `SYNO.Core.FileServ.NFS` reports NFS off, no share is probed, no
-share is an NFS export, and an existing NFS export object publishes no
-`rule_count` or `allowed_clients`. While NFS is on, a share's answer is
+on: when `SYNO.Core.FileServ.NFS` reports NFS off, no share is probed and
+no share is an NFS export. An existing NFS export object is then reported
+ERROR each cycle, with a reason that says NFS is off (it publishes
+nothing, so no stale value is refreshed), and its Volume edge is dropped
+because Volumes are emitted with their known children only; its VMWARE
+Datastore edge, if any, stays. The object is not removed: delete it, or
+turn NFS back on and it collects again with its Volume edge. While NFS is on, a share's answer is
 reused for up to 15 minutes before every share is probed again (a new
 share is probed at once); a share whose probe fails is probed again each
 cycle and logs its WARN at most once an hour while it keeps failing.

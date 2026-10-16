@@ -1107,6 +1107,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		// when this share's NFS rule probe failed, it is ERROR too, never
 		// rule_count = 0 for rules that were not read.
 		s.requireNfsProbe(name);
+		// Build 32 (issue #20, review W1): with the NFS service off no share
+		// was probed; an existing export is ERROR, never stale and green.
+		SnapshotIsolation.requireNfsService(s.nfsDisabled, name);
 		SimpleJson share = s.findShare(name);
 		if (share == null) {
 			logWarn("collect: nfs-export " + name + " absent from snapshot");
@@ -1126,20 +1129,16 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				share.get("enable_share_cow").asBoolean() ? "true" : "false");
 		prop(out, "Access|compress_enabled",
 				share.get("enable_share_compress").asBoolean() ? "true" : "false");
-		// Build 32 (issue #20): with the NFS service off no share was
-		// probed, so the rule keys are skipped, never rule_count = 0.
-		if (!s.nfsDisabled) {
-			prop(out, "Access|rule_count", String.valueOf(ruleCount));
+		prop(out, "Access|rule_count", String.valueOf(ruleCount));
 
-			StringBuilder clients = new StringBuilder();
-			if (rules != null) {
-				for (SimpleJson rule : rules.data().get("rule").asList()) {
-					if (clients.length() > 0) clients.append(", ");
-					clients.append(rule.get("client").asString(""));
-				}
+		StringBuilder clients = new StringBuilder();
+		if (rules != null) {
+			for (SimpleJson rule : rules.data().get("rule").asList()) {
+				if (clients.length() > 0) clients.append(", ");
+				clients.append(rule.get("client").asString(""));
 			}
-			prop(out, "Access|allowed_clients", clients.toString());
 		}
+		prop(out, "Access|allowed_clients", clients.toString());
 
 		metric(out, "Capacity|size_used_mib", share.get("share_quota_used").asDouble());
 		metric(out, "Capacity|size_logical_mib",
@@ -1472,7 +1471,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		/**
 		 * Build 32 (issue #20): the NFS service reported itself off, so no
 		 * share was probed: no share is an export this cycle, and an existing
-		 * export object publishes no rule keys (its rules were not read).
+		 * export object is ERROR (review W1; its rules were not read).
 		 */
 		boolean nfsDisabled;
 

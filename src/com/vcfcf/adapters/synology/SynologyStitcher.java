@@ -109,6 +109,7 @@ public final class SynologyStitcher {
 		Map<String, List<ResourceKey>> index = new HashMap<>();
 		boolean ok = false;
 		int total = 0;
+		java.util.Set<String> seen = new java.util.HashSet<>();
 		try {
 			List<ForeignResourceResolver.ResourceEntry> entries =
 					bridge.listResources("VMWARE", "Datastore");
@@ -129,7 +130,11 @@ public final class SynologyStitcher {
 							pathVal = id[1];
 						}
 					}
-					if (pathVal != null && !pathVal.isEmpty()) {
+					// Review N3: a row returned twice across a page boundary
+					// is indexed once.
+					if (pathVal != null && !pathVal.isEmpty()
+							&& DatastoreIndex.firstSighting(seen, pathVal, e.name,
+									e.identifiers)) {
 						index.computeIfAbsent(pathVal, k -> new ArrayList<>())
 								.add(key);
 					}

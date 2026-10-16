@@ -22,6 +22,8 @@ public final class DatastoreIndexTest {
 		reloadAtMostEveryTtl();
 		newMissReloadsOnceKnownMissDoesNot();
 		failedLoadRetriesNextCycle();
+		emptyPageBeforeTotalIsAFailedLoad();
+		duplicateRowsAreIndexedOnce();
 		System.out.println("DatastoreIndexTest: all assertions passed");
 	}
 
@@ -149,5 +151,34 @@ public final class DatastoreIndexTest {
 		now[0] += 5 * MIN;
 		T.check(!p.beginCycle(), "then reused");
 		T.eq(5 * MIN, p.ageMs(), "age");
+	}
+
+	/** Review N3: the list shrank while paged; never cache the partial list. */
+	static void emptyPageBeforeTotalIsAFailedLoad() throws Exception {
+		DatastoreIndex.PageFetcher<Object> shrinking = (page, size) -> page == 0
+				? obj("resourceList", java.util.Arrays.asList(obj("n", 1), obj("n", 2)),
+						"pageInfo", obj("totalCount", 5))
+				: obj("resourceList", new ArrayList<>(), "pageInfo", obj("totalCount", 5));
+		try {
+			DatastoreIndex.fetchAll(MAPS, shrinking, 2, w -> { });
+			throw new AssertionError("an empty page before totalCount must fail the load");
+		} catch (java.io.IOException expected) {
+			T.check(expected.getMessage().contains("2 of 5"), expected.getMessage());
+		}
+	}
+
+	/** Review N3: one Datastore identity is indexed once per path. */
+	static void duplicateRowsAreIndexedOnce() {
+		java.util.Set<String> seen = new java.util.HashSet<>();
+		List<String[]> ids = java.util.Arrays.asList(
+				new String[] {"VMEntityObjectID", "datastore-1", "true"},
+				new String[] {"DataStrorePath", "VMFS:|naa.1|", "false"});
+		T.check(DatastoreIndex.firstSighting(seen, "VMFS:|naa.1|", "ds1", ids), "first");
+		T.check(!DatastoreIndex.firstSighting(seen, "VMFS:|naa.1|", "ds1", ids), "duplicate");
+		List<String[]> other = java.util.Arrays.asList(
+				new String[] {"VMEntityObjectID", "datastore-9", "true"},
+				new String[] {"DataStrorePath", "VMFS:|naa.1|", "false"});
+		T.check(DatastoreIndex.firstSighting(seen, "VMFS:|naa.1|", "ds1", other),
+				"another vCenter's copy of the same path is kept");
 	}
 }

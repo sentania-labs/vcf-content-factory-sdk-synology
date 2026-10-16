@@ -34,13 +34,29 @@ final class DatastoreIndex {
 	}
 
 	/**
+	 * Review N3: whether this identity was already indexed under this path.
+	 * A row shifted across a page boundary while the list changes can come
+	 * back twice; it is indexed once, so no Datastore gets the same child
+	 * twice.
+	 */
+	static boolean firstSighting(java.util.Set<String> seen, String path,
+			String name, List<String[]> identifiers) {
+		StringBuilder sig = new StringBuilder(path).append('\u0000').append(name);
+		for (String[] id : identifiers) {
+			sig.append('\u0000').append(id == null ? "" : String.join("=", id));
+		}
+		return seen.add(sig.toString());
+	}
+
+	/**
 	 * Every {@code resourceList} entry across all pages. Pages until the
 	 * collected count reaches {@code pageInfo.totalCount}, a page comes back
 	 * empty, or (when the Suite API sends no {@code totalCount}) a page is
 	 * short. Stops at {@link #MAX_PAGES} pages and says so through
-	 * {@code warn}. A failed page throws (the caller then has no index for
-	 * the cycle, as before): a partial list is never passed off as the
-	 * whole one.
+	 * {@code warn}. A failed page, or an empty page before
+	 * {@code totalCount} is reached (review N3), throws (the caller then has
+	 * no index for the cycle, as before): a partial list is never passed
+	 * off as the whole one.
 	 */
 	static <J> List<J> fetchAll(SynologyTopology.Json<J> js, PageFetcher<J> fetch,
 			int pageSize, java.util.function.Consumer<String> warn) throws Exception {
@@ -51,7 +67,17 @@ final class DatastoreIndex {
 			all.addAll(rows);
 			Double total = SynologyMetrics.num(js,
 					js.get(js.get(root, "pageInfo"), "totalCount"));
-			if (rows.isEmpty()) return all;
+			if (rows.isEmpty()) {
+				// Review N3: an empty page before totalCount is reached (the
+				// list shrank while it was paged) is a failed load, never a
+				// partial index passed off as the whole one.
+				if (total != null && all.size() < total) {
+					throw new java.io.IOException("Suite API Datastore list: page "
+							+ page + " was empty after " + all.size() + " of "
+							+ total.longValue() + " entries");
+				}
+				return all;
+			}
 			if (total != null ? all.size() >= total : rows.size() < pageSize) {
 				return all;
 			}

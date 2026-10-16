@@ -810,6 +810,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		metric(out, "System|uptime", (double) dsmInfo.data().get("uptime").asLong());
 
 		SimpleJson cpu = util.data().get("cpu");
+		// Build 32 (issue #24): Unix-style load averages (run-queue length),
+		// unitless, not percent. Published as DSM reports them. DSM appears
+		// to scale them by 100 (the devel baseline shows 13 with 0 % CPU on
+		// a 4-core NAS), but that is unconfirmed, so no division here until
+		// devel compares them with /proc/loadavg.
 		metric(out, "CPU|cpu_load_1m", cpu.get("1min_load").asDouble());
 		metric(out, "CPU|cpu_load_5m", cpu.get("5min_load").asDouble());
 		metric(out, "CPU|cpu_load_15m", cpu.get("15min_load").asDouble());

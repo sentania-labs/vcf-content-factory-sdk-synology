@@ -23,3 +23,4 @@ python3 tests/test_snapshot_logger_once.py
 python3 tests/test_logout_client_discard.py
 python3 tests/test_suite_api_log_redaction.py
 python3 tests/test_session_name_wiring.py
+python3 tests/test_describe_units.py

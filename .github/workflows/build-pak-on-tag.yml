@@ -191,6 +191,13 @@ jobs:
           fi
           echo "Tag ${GITHUB_REF_NAME} matches adapter.yaml (${expected})."
 
+      # The adapter's plain-JDK unit tests (compliance build 58, review W3).
+      # Run before the buildkit and the SDK jar are fetched, so a tag never
+      # builds a pak whose logic fails its own tests. Needs only the JDK set
+      # up above; no SDK jar, no secret.
+      - name: Run adapter unit tests
+        run: bash ci/run_java_tests.sh
+
       - name: Download sdk-buildkit from factory releases
         env:
           # The factory repo is public, so the job's github.token can read its

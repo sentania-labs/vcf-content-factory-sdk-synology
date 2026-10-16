@@ -55,6 +55,17 @@ final class SynologyMetrics {
 		return kb == null ? null : kb * 1024.0;
 	}
 
+	/**
+	 * Review N7 on build 32: DSM's {@code real_usage} percent, or
+	 * {@code null} when it is absent or {@code total_real} is missing or 0
+	 * (a hollow memory object would otherwise publish 0 %).
+	 */
+	static <J> Double memoryUsagePct(SynologyTopology.Json<J> js, J memory) {
+		Double total = num(js, js.get(memory, "total_real"));
+		if (total == null || total <= 0) return null;
+		return num(js, js.get(memory, "real_usage"));
+	}
+
 	/** Issue #18: swap in use, bytes ({@code total_swap - avail_swap}). */
 	static <J> Double swapUsedBytes(SynologyTopology.Json<J> js, J memory) {
 		Double total = memoryBytes(js, memory, "total_swap");
@@ -76,9 +87,10 @@ final class SynologyMetrics {
 	 * <li>A {@code device == "total"} row is DSM's own aggregate: it is used
 	 *     alone.</li>
 	 * <li>Without one, the per-interface rows are summed, leaving out
-	 *     {@code lo} and a VLAN interface ({@code eth0.131}) whose parent
-	 *     ({@code eth0}) is also listed, since the parent's counters already
-	 *     carry its traffic.</li>
+	 *     {@code lo}, a VLAN interface ({@code eth0.131}) whose parent
+	 *     ({@code eth0}) is also listed, and an Open vSwitch bridge
+	 *     ({@code ovs_eth0}) whose member is listed, since those counters
+	 *     already carry the same traffic.</li>
 	 * <li>Without a total row and with a bond ({@code bondN}) listed, the
 	 *     bond's member NICs carry the same traffic as the bond, and the
 	 *     array does not say which NICs are members, so nothing is
@@ -112,6 +124,9 @@ final class SynologyMetrics {
 			if ("lo".equals(d)) continue;
 			int dot = d.indexOf('.');
 			if (dot > 0 && devices.contains(d.substring(0, dot))) continue;
+			// Review N5: an Open vSwitch bridge (ovs_eth0, created by Virtual
+			// Machine Manager) carries its member's traffic again.
+			if (d.startsWith("ovs_") && devices.contains(d.substring(4))) continue;
 			Double r = num(js, js.get(row, "rx"));
 			Double t = num(js, js.get(row, "tx"));
 			if (r == null || t == null) return null;

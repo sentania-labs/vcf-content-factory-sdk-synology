@@ -847,7 +847,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				SynologyMetrics.memoryBytes(SJ, mem, "avail_real"));
 		metricIfPresent(out, "Memory|memory_total",
 				SynologyMetrics.memoryBytes(SJ, mem, "total_real"));
-		metric(out, "Memory|memory_usage_pct", mem.get("real_usage").asDouble());
+		metricIfPresent(out, "Memory|memory_usage_pct",
+				SynologyMetrics.memoryUsagePct(SJ, mem));
 		metricIfPresent(out, "Memory|memory_cached",
 				SynologyMetrics.memoryBytes(SJ, mem, "cached"));
 		metricIfPresent(out, "Memory|swap_usage",

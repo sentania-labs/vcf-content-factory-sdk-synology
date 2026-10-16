@@ -26,6 +26,8 @@ public final class MetricsTest {
 		networkWithoutTotalSkipsVlanAndLoopback();
 		networkWithBondAndNoTotalIsNotPublished();
 		networkEdgeCases();
+		ovsBridgeIsNotCountedTwice();
+		memoryUsageNeedsATotal();
 		volumeFreeIsTotalMinusUsed();
 		poolIsAllocationAsDsmReports();
 		capacityWithoutTotalPublishesNoUsage();
@@ -185,5 +187,28 @@ public final class MetricsTest {
 				"read_avg_latency", "read_latency"), "old field name still read");
 		T.eq(null, SynologyMetrics.lunLatency(MAPS, obj("read_iops", 3),
 				"read_avg_latency", "read_latency"), "absent: not published");
+	}
+
+	/** Review N5: ovs_eth0 beside eth0 carries the same traffic. */
+	static void ovsBridgeIsNotCountedTwice() {
+		double[] t = SynologyMetrics.networkTotals(MAPS, java.util.Arrays.asList(
+				obj("device", "eth0", "rx", 1000, "tx", 100),
+				obj("device", "ovs_eth0", "rx", 1000, "tx", 100),
+				obj("device", "eth1", "rx", 500, "tx", 50)));
+		T.eq(1500.0, t[0], "ovs bridge skipped when its member is listed");
+		double[] lone = SynologyMetrics.networkTotals(MAPS, java.util.Arrays.asList(
+				obj("device", "ovs_eth0", "rx", 700, "tx", 70)));
+		T.eq(700.0, lone[0], "a lone ovs bridge is the interface itself");
+	}
+
+	/** Review N7: memory_usage_pct needs a positive total_real. */
+	static void memoryUsageNeedsATotal() {
+		T.eq(22.0, SynologyMetrics.memoryUsagePct(MAPS, memory()), "as DSM sends it");
+		T.eq(null, SynologyMetrics.memoryUsagePct(MAPS, obj("real_usage", 22)),
+				"no total: not published");
+		T.eq(null, SynologyMetrics.memoryUsagePct(MAPS,
+				obj("total_real", 0, "real_usage", 0)), "zero total: not published");
+		T.eq(null, SynologyMetrics.memoryUsagePct(MAPS, obj("total_real", 5)),
+				"no real_usage: not published, not 0");
 	}
 }

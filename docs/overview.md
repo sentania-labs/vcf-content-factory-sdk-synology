@@ -37,14 +37,16 @@ metric list):
 names (keys such as `total_bytes` appear on several kinds; see
 `REFERENCE.md` for the authoritative list). Highlights:
 
-- **DiskStation** — system temperature, uptime, per-window CPU load,
-  memory usage, network RX/TX, NFS ops/latency/client-count.
-- **Pools / Volumes** — total/used/free capacity and usage %, plus volume
-  read/write throughput, IOPS, and utilization.
-- **Disks** — temperature, SMART status, uncorrectable sectors, remaining
-  life, and per-disk IO.
-- **iSCSI LUNs** — read/write IOPS, throughput, and latency.
-- **NFS exports** — used/logical size, quota usage %, active client count.
+- **DiskStation**: system temperature, uptime, 1, 5 and 15 minute load
+  averages, memory usage, network RX/TX, NFS ops/latency/client-count.
+- **Storage pools**: total capacity and the space allocated to volumes
+  (allocated and allocated %).
+- **Volumes**: total and free capacity and usage %, plus read/write
+  throughput, IOPS, and utilization.
+- **Disks**: temperature, SMART status, uncorrectable sectors, remaining
+  life (SSDs), and per-disk IO.
+- **iSCSI LUNs**: read/write IOPS, throughput, and latency.
+- **NFS exports**: used/logical size, quota usage %, active client count.
 
 ## Cross-Adapter Behavior
 

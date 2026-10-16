@@ -11,8 +11,8 @@ Full docset (overview, installing & configuring, inventory tree): [`docs/README.
 | Object | Metrics | Properties |
 |---|---|---|
 | **Synology World** | Global aggregation root | — |
-| **DiskStation** | CPU, memory, network, temperature, uptime, NFS ops/latency | Model, hostname, firmware, fan status |
-| **Storage Pool** | Capacity (total, used, usage %) | RAID type, status, disk count |
+| **DiskStation** | CPU, load averages, memory, network, temperature, uptime, NFS ops/latency | Model, hostname, firmware, fan status |
+| **Storage Pool** | Capacity (total, allocated, allocated %) | RAID type, status, disk count |
 | **Volume** | Capacity, IO (read/write throughput, IOPS, utilization), SSD cache hit rates | Filesystem type, status, volume path |
 | **Disk** | Temperature, SMART health, IO (read/write throughput, IOPS, utilization), remaining life | Model, firmware, serial, vendor, disk type, drive family, slot ID, capacity |
 | **iSCSI LUN** | IO (read/write IOPS, throughput, latency) | Name, size, location, type, target IQN |
@@ -32,8 +32,8 @@ Synology storage health.
 
 ## Install
 
-1. Open VCF Operations → **Administration → Solutions**
-2. Click **Add** (or the upload icon)
+1. Open VCF Operations and go to **Administration > Integrations > Repository** (9.x; on 8.x, **Data Sources > Integrations > Repository**)
+2. Click **Add**
 3. Select the `.pak` file from this package
 4. Accept the EULA and wait for installation to complete (~30 seconds)
 
@@ -41,7 +41,7 @@ Synology storage health.
 
 After installation, create an adapter instance:
 
-1. Go to **Administration > Integrations > Accounts** (VCF Operations 9.x)
+1. Go to **Administration > Integrations > Accounts** (9.x; on 8.x, **Data Sources > Integrations > Accounts**)
 2. Click **Add Account** and select **VCF Content Factory Synology DiskStation**
 3. Fill in:
    - **Host / IP Address**: Your NAS hostname or IP (e.g., `storage.example.com`)

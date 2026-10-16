@@ -225,8 +225,10 @@ path's HTTPS requirement.
 
 ## Step-by-Step Installation
 
-1. Install the `.pak` file via **Administration > Solutions > Add**.
-2. After installation, navigate to **Data Sources > Integrations > Accounts**.
+1. Install the `.pak` file via **Administration > Integrations > Repository > Add**
+   (9.x; on 8.x, **Data Sources > Integrations > Repository**).
+2. After installation, navigate to **Administration > Integrations > Accounts**
+   (9.x; on 8.x, **Data Sources > Integrations > Accounts**).
 3. Click **Add Account** and select **VCF Content Factory Synology DiskStation**.
 4. Fill in the configuration fields above (host, port `5001`, DSM
    credentials; leave `allowInsecure` at `false`).

@@ -1,0 +1,23 @@
+# Runs the pak test matrix (ci/run_java_tests.sh on JDK 17 and 25) on
+# every push and pull request by calling the SDK template's reusable
+# workflow. Rationale (GitHub-hosted only, no secrets, no SDK jar, why two
+# JDKs) lives in that workflow's header:
+# sentania-labs/vcf-content-factory-sdk-template/.github/workflows/pak-tests.yml
+name: tests
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    uses: sentania-labs/vcf-content-factory-sdk-template/.github/workflows/pak-tests.yml@main

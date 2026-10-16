@@ -26,61 +26,192 @@ import java.net.http.HttpResponse;
  * auth strategies. This is a framework gap: a QueryParamAuth strategy
  * should be added for APIs that authenticate via query parameters.
  */
-public final class SynologyApiClient {
-
-	private static final String SESSION_NAME = "VCFContentFactory";
+public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson> {
 
 	private final ManagedHttpClient http;
+	/**
+	 * Build 31 (review W5): the client the logout goes over. For a collect
+	 * configuration a single-attempt client with a short timeout, so
+	 * releasing an old configuration whose NAS is gone does not hold
+	 * configure or discard for three 30 s attempts; the tester uses its own
+	 * client for both.
+	 */
+	private final ManagedHttpClient logoutHttp;
 	private final String username;
 	private final String password;
 	private final Logger log;
-	private volatile String sid;
+	/** Build 31 (review W5): session id and closed flag; see {@link DsmSession}. */
+	private final DsmSession session;
+	/**
+	 * Build 32 (issue #23): this client's DSM session name, per instance (or
+	 * per Test Connection); see {@link SynologyConfig#sessionName}.
+	 */
+	private final String sessionName;
+	/**
+	 * Build 32 (issue #31): the CGI path and version per API, from
+	 * SYNO.API.Info at the first login; see {@link DsmApis}.
+	 */
+	private final DsmApis apis = new DsmApis();
+	/**
+	 * Build 32 (issue #31, review N6): SYNO.API.Info answered (read, or
+	 * failed for a reason other than an unreachable NAS) for this client,
+	 * so it is not asked again; one client per configuration.
+	 */
+	private volatile boolean apiInfoAsked;
 
 	public SynologyApiClient(ManagedHttpClient http, String username,
-			String password, Logger log) {
+			String password, String sessionName, Logger log) {
+		this(http, http, username, password, sessionName, log);
+	}
+
+	public SynologyApiClient(ManagedHttpClient http, ManagedHttpClient logoutHttp,
+			String username, String password, String sessionName, Logger log) {
 		this.http = http;
+		this.logoutHttp = logoutHttp;
 		this.username = username;
 		this.password = password;
+		this.sessionName = sessionName;
 		this.log = log;
+		// Codex P2: a dedicated logout client is discarded on close (after
+		// the logout attempt, with or without a session). When it is the
+		// main client (the tester), the main client is not ours to discard.
+		this.session = new DsmSession(this::sendLogin, this::sendLogout,
+				logoutHttp != null && logoutHttp != http
+						? logoutHttp::discard : null);
 	}
 
 	// --- Session management ---
 
+	/**
+	 * Logs in. Build 31 (review W5): throws
+	 * {@link SynologyClientClosedException} without contacting the NAS once
+	 * {@link #close} was called.
+	 */
 	public String login() throws IOException, InterruptedException {
-		String path = synoUrl("SYNO.API.Auth", 7, "login",
+		return session.login();
+	}
+
+	private String sendLogin() throws IOException, InterruptedException {
+		// Build 32 (issue #31): learn the API versions first, once per
+		// client (review N6: not again at each re-login while unread).
+		if (!apiInfoAsked) {
+			loadApiInfo();
+		}
+		String path = synoUrl(DsmApis.AUTH, 7, "login",
 				"account=" + urlEncode(username),
 				"passwd=" + urlEncode(password),
-				"session=" + SESSION_NAME,
+				"session=" + urlEncode(sessionName),
 				"format=sid");
 		SimpleJson resp = callRaw(path, "SYNO.API.Auth login");
 		if (!resp.isSuccess()) {
 			int code = (int) resp.get("error").get("code").asLong();
-			throw new IOException("Synology login failed: error code " + code);
+			// Build 31 (issue #12): typed, so an authentication-class refusal
+			// (DSM error code in the body of a 200) is recognized by code, not
+			// by message text, and is never retried within the cycle. No
+			// account, password or session id in the message.
+			String meaning = SynologyFailures.loginCodeMeaning(code);
+			throw new SynologyDsmException("Synology login failed: error code "
+					+ code + (meaning.isEmpty() ? "" : " (" + meaning + ")"),
+					code, true);
 		}
-		this.sid = resp.data().get("sid").asString();
-		log.info("Synology login succeeded, session=" + SESSION_NAME);
-		return this.sid;
+		String sid = resp.data().get("sid").asString();
+		log.info("Synology login succeeded, session=" + sessionName);
+		return sid;
 	}
 
-	public void logout() {
-		if (sid == null) return;
+	/**
+	 * Build 32 (issue #31): asks {@code SYNO.API.Info} (no session needed)
+	 * which version and CGI path each API this adapter uses is offered at,
+	 * so {@link #call} uses {@code min(maxVersion, desired)}. Never fails the
+	 * login: any failure but an unreachable NAS leaves the built-in versions
+	 * (build 31) in use, with one WARN, and is not asked again by this
+	 * client (review N6; an edit builds a new client, which asks again). An
+	 * unreachable NAS (connect failure, timeout) is rethrown, and the next
+	 * login asks again:
+	 * the login would fail the same way, and waiting out a second set of
+	 * timeouts for it would double the cost of a down NAS.
+	 */
+	private void loadApiInfo() throws IOException, InterruptedException {
+		DsmApis.Load found;
 		try {
-			callRaw(synoUrl("SYNO.API.Auth", 7, "logout",
-					"session=" + SESSION_NAME), "SYNO.API.Auth logout");
+			found = apis.load(SynologyAdapter.SJ,
+					callRaw(DsmApis.INFO_PATH, "SYNO.API.Info query"));
+		} catch (InterruptedException ie) {
+			throw ie;
+		} catch (Exception e) {
+			if (SynologyFailures.isUnreachable(e)) {
+				throw e;
+			}
+			apiInfoAsked = true;
+			log.warn("SYNO.API.Info is not readable ("
+					+ redact(SynologyFailures.describe(e)) + "); using the "
+					+ "adapter's built-in DSM API versions (DSM 7.2 or later). "
+					+ "Not asked again until the instance is edited.");
+			return;
+		}
+		apiInfoAsked = true;
+		if (!found.missingRequired.isEmpty()) {
+			log.warn("This DSM does not offer the required API(s) "
+					+ found.missingRequired + " (per SYNO.API.Info), so nothing "
+					+ "can be collected from it. The adapter supports DSM 7.2 or "
+					+ "later. They are still tried, so the NAS's own answer is "
+					+ "what the collection error shows.");
+		}
+		// Review W4: an older API version may return an older payload that
+		// lacks fields this adapter reads, so a lowered version is a WARN.
+		if (!found.lowered.isEmpty()) {
+			log.warn("This DSM offers only older versions of " + found.lowered
+					+ " (per SYNO.API.Info); the adapter uses them, but values "
+					+ "from these APIs are unverified: a field the older version "
+					+ "does not return is skipped or, for some keys, reads 0. The "
+					+ "adapter is tested on DSM 7.2 or later.");
+		}
+		log.info("SYNO.API.Info read: "
+				+ (found.lowered.isEmpty() ? "every API at its desired version"
+						: "older versions in use: " + found.lowered)
+				+ (found.missingOptional.isEmpty() ? ""
+						: "; not offered (optional): " + found.missingOptional));
+	}
+
+	/** Logs the session out (if any); the client stays usable. */
+	public void logout() {
+		session.logout();
+	}
+
+	/**
+	 * Build 31 (review W5): closes the client for good (no login after
+	 * this, so a cycle still running on it cannot re-login), then logs the
+	 * session out over {@link #logoutHttp}, best effort, then discards
+	 * {@link #logoutHttp} when it is a dedicated client (Codex P2), with or
+	 * without a session and even when the logout failed. Never throws.
+	 */
+	public void close() {
+		session.close();
+	}
+
+	private void sendLogout(String sid) {
+		try {
+			// Build 32 (issue #23): this client's own session name, and its
+			// _sid (synoUrl adds it), so only this client's session ends.
+			callRaw(logoutHttp, synoUrl(sid, apis.pick(DsmApis.AUTH, 7),
+					DsmApis.AUTH, "logout", "session=" + urlEncode(sessionName)),
+					"SYNO.API.Auth logout");
+		} catch (InterruptedException ie) {
+			Thread.currentThread().interrupt();
+			log.warn("Logout interrupted (non-fatal)");
 		} catch (Exception e) {
 			// e.getMessage() may carry the request URL (with _sid) if the
 			// underlying transport embeds it; redact before it reaches the log.
 			log.warn("Logout failed (non-fatal): " + redact(String.valueOf(e.getMessage())));
 		}
-		sid = null;
 	}
 
 	public void ensureSession() throws IOException, InterruptedException {
-		if (sid == null) login();
+		session.ensure();
 	}
 
 	public void invalidateSession() {
-		sid = null;
+		session.invalidate();
 	}
 
 	// --- API calls (each returns parsed JSON) ---
@@ -175,7 +306,13 @@ public final class SynologyApiClient {
 				resp = callRaw(synoUrl(api, version, method, extra), endpoint);
 			}
 			if (!resp.isSuccess()) {
-				throw new IOException(api + " " + method + " failed: " + resp.asString());
+				// Build 31 (review W4): typed with the data API's DSM error
+				// code (login=false, so it never counts as a login refusal),
+				// so SnapshotReads can tell "this API does not exist on this
+				// NAS" (102) from any other failure. Same message as before.
+				throw new SynologyDsmException(api + " " + method + " failed: "
+						+ resp.asString(),
+						(int) resp.get("error").get("code").asLong(), false);
 			}
 		}
 		return resp;
@@ -194,10 +331,15 @@ public final class SynologyApiClient {
 	 */
 	private SimpleJson callRaw(String path, String endpoint)
 			throws IOException, InterruptedException {
+		return callRaw(http, path, endpoint);
+	}
+
+	private SimpleJson callRaw(ManagedHttpClient via, String path,
+			String endpoint) throws IOException, InterruptedException {
 		HttpResponse<String> resp;
 		try {
-			resp = http.get(path, HttpResponse.BodyHandlers.ofString());
-		} catch (IOException e) {
+			resp = via.get(path, HttpResponse.BodyHandlers.ofString());
+		} catch (IOException | RuntimeException e) {
 			// DEF-001: a transport failure (connect/SSL/timeout) can throw BEFORE
 			// any response, and the underlying message may embed the request URI —
 			// which on login carries account=/passwd=<plaintext> and on every
@@ -205,8 +347,14 @@ public final class SynologyApiClient {
 			// from the endpoint label only; redact any message text and DO NOT chain
 			// the raw cause (a chained cause re-exposes getCause().getMessage() to
 			// the framework logger). See rules/no-secrets-on-disk.md.
-			throw new IOException("transport error calling " + endpoint + ": "
-					+ redact(String.valueOf(e.getMessage())));
+			// Build 31 (issue #13): keep the failure's class (connect, timeout,
+			// other) as a field instead, so an unreachable NAS maps to DOWN and
+			// a connect failure stops the snapshot build.
+			// Build 32 (issue #17): runtime exceptions from the HTTP layer
+			// (IllegalArgumentException from URI construction,
+			// UncheckedIOException) get the same treatment; before they escaped
+			// with their raw message. InterruptedException is not caught here.
+			throw SynologyRedaction.transportFailure(endpoint, e);
 		}
 		if (resp.statusCode() != 200) {
 			throw new IOException("HTTP " + resp.statusCode() + " from " + endpoint);
@@ -224,16 +372,23 @@ public final class SynologyApiClient {
 	 * left intact so the message still identifies the failing endpoint.
 	 */
 	static String redact(String path) {
-		if (path == null) return "";
-		return path
-				.replaceAll("(?i)(_sid=)[^&]*", "$1<redacted>")
-				.replaceAll("(?i)(passwd=)[^&]*", "$1<redacted>")
-				.replaceAll("(?i)(account=)[^&]*", "$1<redacted>");
+		// Build 32 (issue #17): one implementation, SDK-free and unit tested.
+		return SynologyRedaction.redact(path);
 	}
 
+	/**
+	 * Build 32 (issue #31): {@code version} is the desired version; the URL
+	 * carries {@code min(maxVersion, version)} on DSM's CGI path once
+	 * SYNO.API.Info was read ({@link DsmApis#pick}).
+	 */
 	private String synoUrl(String api, int version, String method, String... extra) {
-		StringBuilder sb = new StringBuilder("/webapi/entry.cgi?api=");
-		sb.append(api).append("&version=").append(version).append("&method=").append(method);
+		return synoUrl(session.sid(), apis.pick(api, version), api, method, extra);
+	}
+
+	private static String synoUrl(String sid, DsmApis.Pick pick, String api,
+			String method, String... extra) {
+		StringBuilder sb = new StringBuilder("/webapi/").append(pick.cgi).append("?api=");
+		sb.append(api).append("&version=").append(pick.version).append("&method=").append(method);
 		if (sid != null) {
 			sb.append("&_sid=").append(sid);
 		}

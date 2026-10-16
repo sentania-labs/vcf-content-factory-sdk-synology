@@ -11,8 +11,8 @@ Full docset (overview, installing & configuring, inventory tree): [`docs/README.
 | Object | Metrics | Properties |
 |---|---|---|
 | **Synology World** | Global aggregation root | — |
-| **DiskStation** | CPU, memory, network, temperature, uptime, NFS ops/latency | Model, hostname, firmware, fan status |
-| **Storage Pool** | Capacity (total, used, usage %) | RAID type, status, disk count |
+| **DiskStation** | CPU, load averages, memory, network, temperature, uptime, NFS ops/latency | Model, hostname, firmware, fan status |
+| **Storage Pool** | Capacity (total, allocated, allocated %) | RAID type, status, disk count |
 | **Volume** | Capacity, IO (read/write throughput, IOPS, utilization), SSD cache hit rates | Filesystem type, status, volume path |
 | **Disk** | Temperature, SMART health, IO (read/write throughput, IOPS, utilization), remaining life | Model, firmware, serial, vendor, disk type, drive family, slot ID, capacity |
 | **iSCSI LUN** | IO (read/write IOPS, throughput, latency) | Name, size, location, type, target IQN |
@@ -27,7 +27,7 @@ Synology storage health.
 ## Prerequisites
 
 - Synology DSM 7.2 or later
-- Admin account with API access on port 5001 (HTTPS)
+- A dedicated DSM account in the administrators group, without 2-step verification, with API access on port 5001 (HTTPS); see [docs/installing.md](docs/installing.md) for hardening it
 - VCF Operations 8.x or 9.x
 
 ## Installing: allow unsigned paks first
@@ -41,9 +41,10 @@ must be on for each install or upgrade of an unsigned pak:
 2. Administrator Settings, Security Settings: click **Activate Unsigned PAK
    Installation** on 9.1 (**Enable Unsigned PAK Installation** on 9.0). The
    change is refused while any cluster node is down.
-3. When uploading the pak (**Administration > Integrations > Repository >
-   Add**), tick **Ignore the PAK file signature checking**. The box only
-   appears once the setting is on.
+3. When uploading the pak (**Data Sources > Integrations > Repository >
+   Add** on 9.1; **Administration > Solutions** on 8.x), tick **Ignore the
+   PAK file signature checking**. The box only appears once the setting is
+   on.
 
 With the setting off, the install fails with
 `unsigned_pak_installation.not.allowed`. This is a cluster-wide security
@@ -54,8 +55,8 @@ keep whatever state the setting had before the upgrade.
 
 ## Install
 
-1. Open VCF Operations → **Administration → Integrations → Repository**
-2. Click **Add** (or the upload icon)
+1. Open VCF Operations and go to **Data Sources > Integrations > Repository** (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**)
+2. Click **Add**
 3. Select the `.pak` file from this package
 4. Accept the EULA and wait for installation to complete (~30 seconds)
 
@@ -63,13 +64,13 @@ keep whatever state the setting had before the upgrade.
 
 After installation, create an adapter instance:
 
-1. Go to **Administration → Solutions → VCF Content Factory Synology DiskStation**
-2. Click **Configure** → **Add Adapter Instance**
+1. Go to **Data Sources > Integrations > Accounts** (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**)
+2. Click **Add Account** and select **VCF Content Factory Synology DiskStation**
 3. Fill in:
    - **Host / IP Address**: Your NAS hostname or IP (e.g., `storage.example.com`)
    - **Port**: HTTPS port (default `5001`)
-   - **Allow Insecure SSL**: `true` if using self-signed certificates
-   - **Username**: DSM admin account
+   - **Allow Insecure SSL**: default `false` (the NAS certificate is validated). `true` turns validation off (lab use only); any other value validates. A self-signed NAS does not need it: Validate Connection offers its certificate for review, you accept it once and validation stays on. Enter the NAS by a name its certificate carries; when it is entered by an IP address the certificate does not list, the review dialog is unproven and Allow Insecure SSL may be the only path. Existing instances keep their stored value on upgrade; see [docs/installing.md](docs/installing.md).
+   - **Username**: the dedicated DSM account (administrators group, no 2-step verification)
    - **Password**: Account password
 4. Click **Test Connection**, then **Save**
 

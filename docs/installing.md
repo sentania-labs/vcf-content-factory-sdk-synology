@@ -7,8 +7,9 @@
 - A Synology DiskStation running **DSM 7.2 or later**.
 - Network reachability from the VCF Operations collector to the NAS on
   **TCP 5001** (DSM HTTPS Web API).
-- A **DSM account in the administrators group**, without 2-step
-  verification (see Permissions Required below).
+- A **dedicated DSM account in the administrators group**, used only by
+  this adapter, without 2-step verification (see Permissions Required
+  below).
 
 ## Permissions Required
 
@@ -30,8 +31,29 @@ Storage Manager, which DSM offers to members of the administrators group,
 so use an account in that group. A non-administrator account has not been
 tested with this adapter. The account must not require 2-step
 verification: the adapter cannot answer a one-time code, so DSM refuses
-the login (error 403 or 406) and the adapter backs off as for a wrong
-password.
+the login (error 403, 404 or 406) and the adapter backs off as for a wrong
+password. The error says so: "2-step verification code required: this
+adapter does not support 2-step verification; use a dedicated DSM account
+without it".
+
+**Hardening the service account.** Because it cannot use 2-step
+verification, give the adapter its own account rather than a person's:
+
+- Create a dedicated DSM user (for example `svc-vcfops`) for this adapter
+  only, with a long random password, and do not use it to sign in to DSM.
+- If 2-step verification is enforced for the whole administrators group
+  (Control Panel > Security > Account, 2-factor authentication
+  enforcement), enforce it for the named users instead and leave this
+  account out. Menu names vary between DSM releases.
+- Deny it every application it does not need (Control Panel > User &
+  Group > the user > Applications): the adapter uses the DSM Web API only,
+  no File Station, SMB, AFP, FTP, rsync or terminal access.
+- Scope it on the network with the DSM firewall (Control Panel > Security
+  > Firewall): allow TCP 5001 from the VCF Operations collector (or Cloud
+  Proxy) that runs this instance and deny the rest for that port, so a
+  leaked credential is usable from nowhere else. DSM Auto Block (Control
+  Panel > Security > Protection) stays on; the adapter's login back-off
+  keeps a wrong password far below its default threshold.
 
 Every other endpoint is optional. When one is refused or unavailable (a
 model without fans, Virtual DSM, a service that is not installed, a

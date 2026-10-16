@@ -11,8 +11,11 @@ import java.util.Map;
  * Build 32: DSM fields to published values (SynologyMetrics). Fixture
  * values are those of the factory API map (knowledge/context/api-maps/
  * synology-system.md) and the devel golden baseline, where DSM sent
- * memory.total_real = 20328576 (KB) on a 20 GB DS1520+. Run from the repo
- * root (ci/run_java_tests.sh).
+ * memory.total_real = 20328576 (KB) on a 20 GB DS1520+. Issue #34 fixtures
+ * are the verbatim DSM 7.3.2 values in knowledge/context/api-maps/
+ * synology-storage.md (volume and pool size, disk remain_life) and
+ * synology-iscsi.md (the Utilization lun[] row). Run from the repo root
+ * (ci/run_java_tests.sh).
  */
 public final class MetricsTest {
 
@@ -23,6 +26,11 @@ public final class MetricsTest {
 		networkWithoutTotalSkipsVlanAndLoopback();
 		networkWithBondAndNoTotalIsNotPublished();
 		networkEdgeCases();
+		volumeFreeIsTotalMinusUsed();
+		poolIsAllocationAsDsmReports();
+		capacityWithoutTotalPublishesNoUsage();
+		remainLifeReadsTheObjectValue();
+		lunLatencyUsesTheAvgFields();
 		System.out.println("MetricsTest: all assertions passed");
 	}
 
@@ -108,5 +116,74 @@ public final class MetricsTest {
 				"a row without a device name");
 		T.eq(null, SynologyMetrics.networkTotals(MAPS, Arrays.asList(
 				obj("device", "lo", "rx", 5, "tx", 6))), "loopback only");
+	}
+
+	static void volumeFreeIsTotalMinusUsed() {
+		// DSM 7.3.2 volume size: strings, no "free" member.
+		SynologyMetrics.Capacity c = SynologyMetrics.volumeCapacity(MAPS,
+				obj("free_inode", "0", "total", "28788160495616",
+						"total_device", "29987667181568", "total_inode", "0",
+						"used", "7632707117056"));
+		T.eq(28788160495616.0, c.total, "volume total");
+		T.eq(28788160495616.0 - 7632707117056.0, c.free, "free = total - used");
+		T.check(Math.abs(c.usagePct - 26.513) < 0.01, "usage about 26.5 %: " + c.usagePct);
+		// A DSM that does send free: it is used as is.
+		SynologyMetrics.Capacity f = SynologyMetrics.volumeCapacity(MAPS,
+				obj("total", 100, "free", 40));
+		T.eq(40.0, f.free, "free as sent");
+		T.eq(60.0, f.usagePct, "usage from free");
+	}
+
+	static void poolIsAllocationAsDsmReports() {
+		SynologyMetrics.Capacity c = SynologyMetrics.poolCapacity(MAPS,
+				obj("total", "29987679764480", "used", "29987679764480"));
+		T.eq(29987679764480.0, c.total, "pool total");
+		T.eq(29987679764480.0, c.used, "pool used = allocated");
+		T.eq(100.0, c.usagePct, "a fully allocated pool reads 100 %");
+	}
+
+	static void capacityWithoutTotalPublishesNoUsage() {
+		SynologyMetrics.Capacity none = SynologyMetrics.volumeCapacity(MAPS, null);
+		T.eq(null, none.total, "no size: no total");
+		T.eq(null, none.free, "no size: no free");
+		T.eq(null, none.usagePct, "no size: no usage, not 0");
+		SynologyMetrics.Capacity zero = SynologyMetrics.poolCapacity(MAPS,
+				obj("total", "0", "used", "0"));
+		T.eq(null, zero.usagePct, "zero total: no usage, not 0");
+		SynologyMetrics.Capacity onlyTotal = SynologyMetrics.volumeCapacity(MAPS,
+				obj("total", "100"));
+		T.eq(100.0, onlyTotal.total, "total alone is published");
+		T.eq(null, onlyTotal.free, "free unknown");
+		T.eq(null, onlyTotal.usagePct, "usage unknown");
+	}
+
+	static void remainLifeReadsTheObjectValue() {
+		T.eq(81.0, SynologyMetrics.remainLife(MAPS,
+				obj("trustable", true, "value", 81)), "NVMe SSD 81 %");
+		T.eq(null, SynologyMetrics.remainLife(MAPS,
+				obj("trustable", true, "value", -1)), "HDD -1 is not published");
+		T.eq(null, SynologyMetrics.remainLife(MAPS,
+				obj("trustable", false, "value", 50)), "untrusted is not published");
+		T.eq(79.0, SynologyMetrics.remainLife(MAPS, obj("value", "79")),
+				"no trustable member: the value counts");
+		T.eq(90.0, SynologyMetrics.remainLife(MAPS, 90), "older DSM plain number");
+		T.eq(null, SynologyMetrics.remainLife(MAPS, null), "absent");
+		T.eq(null, SynologyMetrics.remainLife(MAPS, obj("trustable", true)),
+				"object without value");
+	}
+
+	static void lunLatencyUsesTheAvgFields() {
+		Map<String, Object> row = obj("uuid", "d023e190", "read_iops", 0,
+				"write_iops", 164, "read_throughput", 0, "write_throughput", 867388,
+				"read_avg_latency", 0, "write_avg_latency", 71, "total_iops", 164,
+				"total_throughput", 867388, "total_io_latency", 66);
+		T.eq(0.0, SynologyMetrics.lunLatency(MAPS, row, "read_avg_latency",
+				"read_latency"), "read latency, a real 0");
+		T.eq(71.0, SynologyMetrics.lunLatency(MAPS, row, "write_avg_latency",
+				"write_latency"), "write latency from write_avg_latency");
+		T.eq(5.0, SynologyMetrics.lunLatency(MAPS, obj("read_latency", 5),
+				"read_avg_latency", "read_latency"), "old field name still read");
+		T.eq(null, SynologyMetrics.lunLatency(MAPS, obj("read_iops", 3),
+				"read_avg_latency", "read_latency"), "absent: not published");
 	}
 }

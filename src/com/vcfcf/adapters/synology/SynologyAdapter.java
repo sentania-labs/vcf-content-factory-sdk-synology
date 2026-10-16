@@ -891,12 +891,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			return;
 		}
 
-		SimpleJson size = pool.get("size");
-		double total = size.get("total").asDouble();
-		double used = size.get("used").asDouble();
-		metric(out, "Capacity|total_bytes", total);
-		metric(out, "Capacity|used_bytes", used);
-		metric(out, "Capacity|usage_pct", total > 0 ? (used / total) * 100.0 : 0.0);
+		// Build 32 (issue #34): DSM's pool size.used is the space allocated
+		// to volumes (a fully allocated pool reads 100 %), so the display
+		// names say "Allocated"; a value DSM did not send is skipped, and
+		// no usage is published for a zero or missing total.
+		SynologyMetrics.Capacity cap =
+				SynologyMetrics.poolCapacity(SJ, pool.get("size"));
+		metricIfPresent(out, "Capacity|total_bytes", cap.total);
+		metricIfPresent(out, "Capacity|used_bytes", cap.used);
+		metricIfPresent(out, "Capacity|usage_pct", cap.usagePct);
 
 		prop(out, "Configuration|raid_type", pool.get("raidType").asString(""));
 		prop(out, "Configuration|status", pool.get("status").asString(""));
@@ -917,12 +920,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 		String volPath = vol.get("vol_path").asString();
 
-		SimpleJson size = vol.get("size");
-		double total = size.get("total").asDouble();
-		double free = size.get("free").asDouble();
-		metric(out, "Capacity|total_bytes", total);
-		metric(out, "Capacity|free_bytes", free);
-		metric(out, "Capacity|usage_pct", total > 0 ? ((total - free) / total) * 100.0 : 0.0);
+		// Build 32 (issue #34): DSM sends size.total and size.used and no
+		// size.free; free was read from the missing field and published as
+		// 0 (100 % used). See SynologyMetrics.volumeCapacity.
+		SynologyMetrics.Capacity cap =
+				SynologyMetrics.volumeCapacity(SJ, vol.get("size"));
+		metricIfPresent(out, "Capacity|total_bytes", cap.total);
+		metricIfPresent(out, "Capacity|free_bytes", cap.free);
+		metricIfPresent(out, "Capacity|usage_pct", cap.usagePct);
 
 		prop(out, "Configuration|volume_path", volPath);
 		prop(out, "Configuration|fs_type", vol.get("fs_type").asString(""));
@@ -975,7 +980,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		metric(out, "Health|temperature", disk.get("temp").asDouble());
 		prop(out, "Health|smart_status", disk.get("smart_status").asString(""));
 		metric(out, "Health|unc_sectors", disk.get("unc").asDouble());
-		metric(out, "Health|remain_life", disk.get("remain_life").asDouble());
+		// Build 32 (issue #34): remain_life is {trustable, value}; -1 (HDD)
+		// and untrusted values are not published. See SynologyMetrics.
+		metricIfPresent(out, "Health|remain_life",
+				SynologyMetrics.remainLife(SJ, disk.get("remain_life")));
 
 		String device = disk.get("device").asString("");
 		if (device.startsWith("/dev/")) device = device.substring(5);
@@ -1063,8 +1071,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			metric(out, "IO|write_iops", io.get("write_iops").asDouble());
 			metric(out, "IO|read_throughput", io.get("read_throughput").asDouble());
 			metric(out, "IO|write_throughput", io.get("write_throughput").asDouble());
-			metric(out, "IO|read_latency", io.get("read_latency").asDouble());
-			metric(out, "IO|write_latency", io.get("write_latency").asDouble());
+			// Build 32 (issue #34): DSM's fields are read_avg_latency and
+			// write_avg_latency; skipped when absent. See SynologyMetrics.
+			metricIfPresent(out, "IO|read_latency", SynologyMetrics.lunLatency(
+					SJ, io, "read_avg_latency", "read_latency"));
+			metricIfPresent(out, "IO|write_latency", SynologyMetrics.lunLatency(
+					SJ, io, "write_avg_latency", "write_latency"));
 		}
 
 	}

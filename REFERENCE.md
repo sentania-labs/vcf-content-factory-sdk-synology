@@ -111,8 +111,8 @@ Generated from `describe.xml` and `resources.properties` for build 1.0.0.16.
 | Key | Label | Type | Unit | Monitored |
 |---|---|---|---|---|
 | `total_bytes` | Total | metric | bytes | yes |
-| `used_bytes` | Used | metric | bytes | yes |
-| `usage_pct` | Usage % | metric | % | yes |
+| `used_bytes` | Allocated | metric | bytes | yes |
+| `usage_pct` | Allocated % | metric | % | yes |
 
 #### Configuration
 

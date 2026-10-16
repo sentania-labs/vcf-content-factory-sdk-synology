@@ -36,6 +36,14 @@ EXPECT = [
     # issue #18: memory stays declared in bytes (values now x1024)
     ("SynologyDiskstation", "memory_total", "bytes", "Memory Total"),
     ("SynologyDiskstation", "memory_available", "bytes", "Memory Available"),
+    # issue #34: a pool's "used" is DSM's allocation to volumes
+    ("SynologyStoragePool", "used_bytes", "bytes", "Allocated"),
+    ("SynologyStoragePool", "usage_pct", "%", "Allocated %"),
+    ("SynologyVolume", "free_bytes", "bytes", "Free"),
+    ("SynologyVolume", "usage_pct", "%", "Usage %"),
+    ("SynologyDisk", "remain_life", "%", "Remaining Life"),
+    ("SynologyIscsiLun", "read_latency", "ms", "Read Latency"),
+    ("SynologyIscsiLun", "write_latency", "ms", "Write Latency"),
 ]
 
 

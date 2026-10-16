@@ -121,4 +121,97 @@ final class SynologyMetrics {
 		}
 		return counted == 0 ? null : new double[] {rx, tx};
 	}
+
+	// -----------------------------------------------------------------------
+	// Issue #34: capacity, remaining life, LUN latency
+	// -----------------------------------------------------------------------
+
+	/** Issue #34: one object's capacity values; a field is null when not known. */
+	static final class Capacity {
+		final Double total;
+		final Double used;
+		final Double free;
+		final Double usagePct;
+
+		Capacity(Double total, Double used, Double free) {
+			this.total = total;
+			this.used = used;
+			this.free = free;
+			this.usagePct = (total != null && total > 0 && used != null)
+					? used / total * 100.0 : null;
+		}
+	}
+
+	/**
+	 * Issue #34: a storage pool's {@code size} object. DSM sends
+	 * {@code total} and {@code used} (strings). For a pool, {@code used} is
+	 * the space allocated to volumes, so a pool fully allocated to its
+	 * volume reads used == total (100 %) whatever the volumes hold; that is
+	 * DSM's answer, published as is (display names say "Allocated").
+	 * Volume fill level is the Volume's capacity.
+	 */
+	static <J> Capacity poolCapacity(SynologyTopology.Json<J> js, J size) {
+		Double total = num(js, js.get(size, "total"));
+		Double used = num(js, js.get(size, "used"));
+		return new Capacity(total, used, null);
+	}
+
+	/**
+	 * Issue #34: a volume's {@code size} object. DSM 7.x sends
+	 * {@code total}, {@code used} and {@code total_device}, and no
+	 * {@code free} (factory API map, DSM 7.3.2): before build 32 the
+	 * adapter read the missing {@code size.free}, published 0 and so 100 %
+	 * used for every volume. Free is now {@code size.free} when DSM sends
+	 * it, else {@code total - used}; usage is used / total.
+	 */
+	static <J> Capacity volumeCapacity(SynologyTopology.Json<J> js, J size) {
+		Double total = num(js, js.get(size, "total"));
+		Double used = num(js, js.get(size, "used"));
+		Double free = num(js, js.get(size, "free"));
+		if (free == null && total != null && used != null) {
+			free = Math.max(0.0, total - used);
+		}
+		if (used == null && total != null && free != null) {
+			used = Math.max(0.0, total - free);
+		}
+		return new Capacity(total, used, free);
+	}
+
+	/**
+	 * Issue #34: a disk's remaining life, percent. DSM 7.x sends
+	 * {@code remain_life} as an object {@code {trustable, value}} (factory
+	 * API map, DSM 7.3.2): before build 32 the adapter read the object as a
+	 * number and published 0 for every disk. A plain number (older DSM) is
+	 * read as is. {@code value < 0} (DSM's -1 for HDDs, which report no
+	 * wear) and {@code trustable == false} are not published.
+	 */
+	static <J> Double remainLife(SynologyTopology.Json<J> js, J node) {
+		if (node == null || js.isNull(node)) return null;
+		Double v = num(js, node);
+		if (v == null) {
+			J trustable = js.get(node, "trustable");
+			if (trustable != null && !js.isNull(trustable) && !js.bool(trustable)) {
+				return null;
+			}
+			v = num(js, js.get(node, "value"));
+		}
+		return v == null || v < 0 ? null : v;
+	}
+
+	/**
+	 * Issue #34: an iSCSI LUN latency from its
+	 * {@code SYNO.Core.System.Utilization} {@code lun[]} row. DSM sends
+	 * {@code read_avg_latency} and {@code write_avg_latency} (factory API
+	 * map); before build 32 the adapter read {@code read_latency} and
+	 * {@code write_latency}, which DSM does not send, and published 0. The
+	 * old names are still read if present.
+	 *
+	 * @param avgKey    {@code read_avg_latency} or {@code write_avg_latency}
+	 * @param legacyKey {@code read_latency} or {@code write_latency}
+	 */
+	static <J> Double lunLatency(SynologyTopology.Json<J> js, J io,
+			String avgKey, String legacyKey) {
+		Double v = num(js, js.get(io, avgKey));
+		return v != null ? v : num(js, js.get(io, legacyKey));
+	}
 }

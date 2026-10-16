@@ -54,20 +54,32 @@ final class DatastoreIndex {
 	 * collected count reaches {@code pageInfo.totalCount}, a page comes back
 	 * empty, or (when the Suite API sends no {@code totalCount}) a page is
 	 * short. Stops at {@link #MAX_PAGES} pages and says so through
-	 * {@code warn}. A failed page, or an empty page before
-	 * {@code totalCount} is reached (review N3), throws (the caller then has
+	 * {@code warn}. A failed page, an empty page before {@code totalCount}
+	 * is reached (review N3), or a {@code totalCount} that changes between
+	 * pages (peer review: the list changed while it was paged), throws (the caller then has
 	 * no index for the cycle, as before): a partial list is never passed
 	 * off as the whole one.
 	 */
 	static <J> List<J> fetchAll(SynologyTopology.Json<J> js, PageFetcher<J> fetch,
 			int pageSize, java.util.function.Consumer<String> warn) throws Exception {
 		List<J> all = new ArrayList<>();
+		Double firstTotal = null;
 		for (int page = 0; page < MAX_PAGES; page++) {
 			J root = fetch.page(page, pageSize);
 			List<J> rows = js.list(js.get(root, "resourceList"));
 			all.addAll(rows);
 			Double total = SynologyMetrics.num(js,
 					js.get(js.get(root, "pageInfo"), "totalCount"));
+			// Peer review: the list changed while it was paged (a row can
+			// shift onto a page already read and be missed while the new
+			// total still matches), so this load is not trusted.
+			if (page == 0) {
+				firstTotal = total;
+			} else if (!java.util.Objects.equals(firstTotal, total)) {
+				throw new java.io.IOException("Suite API Datastore list changed "
+						+ "while it was paged (totalCount " + firstTotal + " on page 0, "
+						+ total + " on page " + page + ")");
+			}
 			if (rows.isEmpty()) {
 				// Review N3: an empty page before totalCount is reached (the
 				// list shrank while it was paged) is a failed load, never a

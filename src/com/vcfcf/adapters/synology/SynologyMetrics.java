@@ -91,7 +91,8 @@ final class SynologyMetrics {
 	 *     ({@code eth0}) is also listed, and an Open vSwitch bridge
 	 *     ({@code ovs_eth0}) whose member is listed, since those counters
 	 *     already carry the same traffic.</li>
-	 * <li>Without a total row and with a bond ({@code bondN}) listed, the
+	 * <li>Without a total row and with a bond listed (any name containing
+	 *     {@code bond}: {@code bond0}, {@code ovs_bond0}), the
 	 *     bond's member NICs carry the same traffic as the bond, and the
 	 *     array does not say which NICs are members, so nothing is
 	 *     published.</li>
@@ -114,7 +115,9 @@ final class SynologyMetrics {
 		for (J row : rows) {
 			String d = js.str(js.get(row, "device"));
 			if (d == null) return null;
-			if (d.startsWith("bond")) return null;
+			// Peer review: any bond (bond0, ovs_bond0) hides which NICs are
+			// its members, so without a total row nothing is published.
+			if (d.contains("bond")) return null;
 			devices.add(d);
 		}
 		double rx = 0, tx = 0;

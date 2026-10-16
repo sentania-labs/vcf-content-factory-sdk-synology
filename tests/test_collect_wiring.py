@@ -65,6 +65,17 @@ def main():
         "memory_usage_pct is not published through memoryUsagePct"
     assert ADAPTER.count("\"Memory|memory_usage_pct\"") == 1, \
         "memory_usage_pct is published somewhere else too"
+    # Peer review: Volume cache hit rates and SSD cache total_capacity are
+    # published only when DSM sent the field.
+    for key, field in (("Cache|cache_read_hit_rate", "hit_rate"),
+                       ("Cache|cache_write_hit_rate", "hit_rate_write")):
+        assert re.search(r'metricIfPresent\(out, "' + re.escape(key) + r'",\s*'
+                         r'SynologyMetrics\.num\(SJ, cache\.get\("' + field + r'"\)\)\);',
+                         ADAPTER), f"{key} is not published only when present"
+    cache = body(ADAPTER, r"private void collectSsdCache\(")
+    assert re.search(r"Double totalBytes = SynologyMetrics\.num\(SJ, size\.get\(\"total\"\)\);"
+                     r"\s*if \(totalBytes != null\)\s*\{\s*prop\(out, \"Hardware\|total_capacity\"",
+                     cache), "total_capacity is published without a size.total"
     print("test_collect_wiring: all assertions passed")
 
 

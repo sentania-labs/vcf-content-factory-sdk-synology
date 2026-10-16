@@ -27,6 +27,7 @@ public final class MetricsTest {
 		networkWithBondAndNoTotalIsNotPublished();
 		networkEdgeCases();
 		ovsBridgeIsNotCountedTwice();
+		anyBondNameWithoutTotalIsNotPublished();
 		memoryUsageNeedsATotal();
 		volumeFreeIsTotalMinusUsed();
 		poolIsAllocationAsDsmReports();
@@ -210,5 +211,18 @@ public final class MetricsTest {
 				obj("total_real", 0, "real_usage", 0)), "zero total: not published");
 		T.eq(null, SynologyMetrics.memoryUsagePct(MAPS, obj("total_real", 5)),
 				"no real_usage: not published, not 0");
+	}
+
+	/** Peer review: ovs_bond0 without a listed bond0 is still a bond. */
+	static void anyBondNameWithoutTotalIsNotPublished() {
+		T.eq(null, SynologyMetrics.networkTotals(MAPS, java.util.Arrays.asList(
+				obj("device", "eth0", "rx", 200, "tx", 200),
+				obj("device", "eth1", "rx", 200, "tx", 200),
+				obj("device", "ovs_bond0", "rx", 400, "tx", 400))),
+				"ovs_bond0 without a total row: not published");
+		double[] t = SynologyMetrics.networkTotals(MAPS, java.util.Arrays.asList(
+				obj("device", "ovs_bond0", "rx", 400, "tx", 400),
+				obj("device", "total", "rx", 400, "tx", 400)));
+		T.eq(400.0, t[0], "with a total row the total is used");
 	}
 }

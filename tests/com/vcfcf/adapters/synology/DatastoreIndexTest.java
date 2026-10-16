@@ -24,6 +24,7 @@ public final class DatastoreIndexTest {
 		failedLoadRetriesNextCycle();
 		emptyPageBeforeTotalIsAFailedLoad();
 		duplicateRowsAreIndexedOnce();
+		totalCountChangingBetweenPagesFailsTheLoad();
 		System.out.println("DatastoreIndexTest: all assertions passed");
 	}
 
@@ -180,5 +181,24 @@ public final class DatastoreIndexTest {
 				new String[] {"DataStrorePath", "VMFS:|naa.1|", "false"});
 		T.check(DatastoreIndex.firstSighting(seen, "VMFS:|naa.1|", "ds1", other),
 				"another vCenter's copy of the same path is kept");
+	}
+
+	/**
+	 * Peer review: the list shrinks from 5 to 4 between pages; page 1 then
+	 * meets the new total with one row missed. The load must fail.
+	 */
+	static void totalCountChangingBetweenPagesFailsTheLoad() throws Exception {
+		DatastoreIndex.PageFetcher<Object> shrinking = (page, size) -> page == 0
+				? obj("resourceList", java.util.Arrays.asList(obj("n", 1), obj("n", 2)),
+						"pageInfo", obj("totalCount", 5))
+				: obj("resourceList", java.util.Arrays.asList(obj("n", 4), obj("n", 5)),
+						"pageInfo", obj("totalCount", 4));
+		try {
+			DatastoreIndex.fetchAll(MAPS, shrinking, 2, w -> { });
+			throw new AssertionError("a totalCount change between pages must fail the load");
+		} catch (java.io.IOException expected) {
+			T.check(expected.getMessage().contains("changed while it was paged"),
+					expected.getMessage());
+		}
 	}
 }

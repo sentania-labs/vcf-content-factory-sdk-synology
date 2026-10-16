@@ -969,8 +969,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		if (cache != null) {
 			prop(out, "Cache|cache_enabled", "true");
 			prop(out, "Cache|cache_status", cache.get("status").asString(""));
-			metric(out, "Cache|cache_read_hit_rate", cache.get("hit_rate").asDouble());
-			metric(out, "Cache|cache_write_hit_rate", cache.get("hit_rate_write").asDouble());
+			// Peer review: published only when DSM sent them.
+			metricIfPresent(out, "Cache|cache_read_hit_rate",
+					SynologyMetrics.num(SJ, cache.get("hit_rate")));
+			metricIfPresent(out, "Cache|cache_write_hit_rate",
+					SynologyMetrics.num(SJ, cache.get("hit_rate_write")));
 		}
 	}
 
@@ -1049,11 +1052,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			}
 		}
 		prop(out, "Hardware|disk_members", members.toString());
-		double totalBytes = size.get("total").asDouble();
 		// Build 32 (issue #29): divided by 1024^3, so the unit is GiB (it
-		// was labelled GB).
-		prop(out, "Hardware|total_capacity",
-				String.format("%.1f GiB", totalBytes / (1024.0 * 1024.0 * 1024.0)));
+		// was labelled GB). Peer review: skipped when DSM sent no size.total,
+		// never "0.0 GiB".
+		Double totalBytes = SynologyMetrics.num(SJ, size.get("total"));
+		if (totalBytes != null) {
+			prop(out, "Hardware|total_capacity",
+					String.format("%.1f GiB", totalBytes / (1024.0 * 1024.0 * 1024.0)));
+		}
 		prop(out, "Hardware|disk_failure_count",
 				String.valueOf(cache.get("disk_failure_number").asLong()));
 	}

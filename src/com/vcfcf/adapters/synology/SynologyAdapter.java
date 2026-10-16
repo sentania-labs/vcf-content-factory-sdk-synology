@@ -774,6 +774,17 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		out.add(new MetricData(new MetricKey(key), System.currentTimeMillis(), value));
 	}
 
+	/**
+	 * Build 32: publishes {@code value} unless it is {@code null} (DSM did
+	 * not supply it), so a value that was not read is never published as 0.
+	 */
+	private static void metricIfPresent(List<MetricData> out, String key,
+			Double value) {
+		if (value != null) {
+			metric(out, key, value);
+		}
+	}
+
 	private static void prop(List<MetricData> out, String key, String value) {
 		out.add(new MetricData(new MetricKey(true, key),
 				System.currentTimeMillis(), value != null ? value : ""));
@@ -807,22 +818,30 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		metric(out, "CPU|cpu_total_load",
 				cpu.get("user_load").asDouble() + cpu.get("system_load").asDouble());
 
+		// Build 32 (issue #18): DSM reports these memory fields in KB; they
+		// are published in bytes (the declared unit), and skipped when DSM
+		// did not send them. See SynologyMetrics.
 		SimpleJson mem = util.data().get("memory");
-		metric(out, "Memory|memory_available", mem.get("avail_real").asDouble());
-		metric(out, "Memory|memory_total", mem.get("total_real").asDouble());
+		metricIfPresent(out, "Memory|memory_available",
+				SynologyMetrics.memoryBytes(SJ, mem, "avail_real"));
+		metricIfPresent(out, "Memory|memory_total",
+				SynologyMetrics.memoryBytes(SJ, mem, "total_real"));
 		metric(out, "Memory|memory_usage_pct", mem.get("real_usage").asDouble());
-		metric(out, "Memory|memory_cached", mem.get("cached").asDouble());
-		metric(out, "Memory|swap_usage",
-				mem.get("total_swap").asDouble() - mem.get("avail_swap").asDouble());
-		metric(out, "Memory|swap_total", mem.get("total_swap").asDouble());
+		metricIfPresent(out, "Memory|memory_cached",
+				SynologyMetrics.memoryBytes(SJ, mem, "cached"));
+		metricIfPresent(out, "Memory|swap_usage",
+				SynologyMetrics.swapUsedBytes(SJ, mem));
+		metricIfPresent(out, "Memory|swap_total",
+				SynologyMetrics.memoryBytes(SJ, mem, "total_swap"));
 
-		double rxTotal = 0, txTotal = 0;
-		for (SimpleJson nic : util.data().get("network").asList()) {
-			rxTotal += nic.get("rx").asDouble();
-			txTotal += nic.get("tx").asDouble();
+		// Build 32 (issue #18): DSM's own "total" row, never a sum that
+		// counts the total row or bond members twice; skipped when the
+		// totals cannot be told. See SynologyMetrics.networkTotals.
+		double[] net = SynologyMetrics.networkTotals(SJ, util.data().get("network"));
+		if (net != null) {
+			metric(out, "Network|net_rx_bytes", net[0]);
+			metric(out, "Network|net_tx_bytes", net[1]);
 		}
-		metric(out, "Network|net_rx_bytes", rxTotal);
-		metric(out, "Network|net_tx_bytes", txTotal);
 		// Build 31 (issue #14): a key whose optional endpoint was not read
 		// this cycle is skipped, never published as 0, "unknown" or "false".
 		if (s.isRead(SnapshotReads.NICS)) {

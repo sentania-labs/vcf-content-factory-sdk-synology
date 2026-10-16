@@ -22,6 +22,7 @@ public final class RedactionTest {
 		runtimeExceptionIsRedactedAndCauseless();
 		ioExceptionKeepsBuild31Shape();
 		wrappedConnectFailureStillDown();
+		suiteApiShapesAreMasked();
 		System.out.println("RedactionTest: all assertions passed");
 	}
 
@@ -77,5 +78,23 @@ public final class RedactionTest {
 		T.check(e.getCause() == null, "unchecked: no chained cause");
 		T.eq(SynologyFailures.Transport.CONNECT, e.kind(), "unchecked: kind");
 		T.check(SynologyFailures.isUnreachable(e), "unchecked: DOWN");
+	}
+
+	/** Build 32 (issue #27): what a Suite API exception message can carry. */
+	static void suiteApiShapesAreMasked() {
+		String raw = "POST https://ops.example/suite-api/api/auth/token/acquire"
+				+ " failed: 401 body={\"username\":\"svc-ops\","
+				+ "\"password\":\"Pa55word\"} token={\"token\":\"tok-777\"}"
+				+ " header Authorization: vRealizeOpsToken tok-888, retry"
+				+ " Basic c3ZjOnB3ZA== Bearer jwt.abc.def"
+				+ " form username=svc-ops&password=Pa55word&x=1";
+		String r = SynologyRedaction.redact(raw);
+		for (String secret : new String[] {"svc-ops", "Pa55word", "tok-777",
+				"tok-888", "c3ZjOnB3ZA==", "jwt.abc.def"}) {
+			T.check(!r.contains(secret), "suite api: " + secret + " leaked: " + r);
+		}
+		T.check(r.contains("401"), "suite api: status kept: " + r);
+		T.check(r.contains("/suite-api/api/auth/token/acquire"),
+				"suite api: path kept: " + r);
 	}
 }

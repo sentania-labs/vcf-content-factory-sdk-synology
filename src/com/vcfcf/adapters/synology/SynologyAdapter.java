@@ -264,8 +264,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				this.suiteStitcher = SuiteApiStitcher.createExplicit(this,
 						componentLogger(SuiteApiStitcher.class),
 						suiteHost, cfg.suiteApiUser, cfg.suiteApiPassword);
+				// Build 32 (issue #27): host only; the Suite API account is
+				// not written to the adapter log.
 				logInfo("Datastore cross-link: explicit Suite API path -> "
-						+ suiteHost + " (user=" + cfg.suiteApiUser + ")");
+						+ suiteHost);
 			} else {
 				this.suiteStitcher = SuiteApiStitcher.create(this,
 						componentLogger(SuiteApiStitcher.class));
@@ -282,7 +284,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 							? "(explicit creds to " + suiteHost
 									+ " could not be resolved): "
 							: "(remote collector without maintenanceuser.properties?): ")
-					+ e.getMessage());
+					// Build 32 (issue #27): redacted before it is logged.
+					+ SynologyRedaction.redact(e.getMessage()));
 		}
 
 		logInfo("SynologyAdapter configured: host=" + cfg.host
@@ -1242,8 +1245,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					+ " datastores loaded, " + lunMatches + " LUN matches, "
 					+ nfsMatches + " NFS matches");
 		} catch (Exception e) {
+			// Build 32 (issue #27): redacted before it is logged.
 			logWarn("Datastore cross-link failed (internal topology unaffected): "
-					+ e.getMessage());
+					+ SynologyRedaction.redact(e.getMessage()));
 		}
 	}
 

@@ -9,6 +9,7 @@ Out of scope here: #11, #16, #32, #35. Issues #33 and #26 were already
 closed by build 31 (see the build 31 entries for #13); no change.
 
 - fix(adapter): build 32, issue #17: **a runtime exception from the HTTP layer no longer escapes with the raw request URI in its message.** `callRaw` now catches `RuntimeException` (an `IllegalArgumentException` from URI construction, an `UncheckedIOException`) as well as `IOException` and rethrows a `SynologyTransportException` built only from the endpoint label, the exception's simple class name and the redacted message, with no chained cause, so `passwd=`, `account=` and `_sid=` cannot reach the adapter log or a Test Connection error. The failure class is kept, so a wrapped connect failure is still DOWN. Redaction moved to the SDK-free `SynologyRedaction` (same patterns). Tests: RedactionTest.
+- fix(adapter): build 32, issue #27: **the Suite API account is no longer written to the adapter log, and Suite API exception messages are redacted before they are logged.** The explicit Suite API path INFO now names the host only. The three WARNs that append a Suite API exception message (stitcher creation failed, Datastore cross-link failed, VMWARE Datastore load failed) pass it through `SynologyRedaction.redact`, which now also masks `password=`, `username=` and `user=` parameters, JSON `username`, `password` and `token` members, and OpsToken, Bearer and Basic credentials. Tests: RedactionTest.suiteApiShapesAreMasked, tests/test_suite_api_log_redaction.py.
 
 ## 0.0.0.31 (Unreleased)
 

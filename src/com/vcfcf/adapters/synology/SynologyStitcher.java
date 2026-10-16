@@ -113,8 +113,9 @@ public final class SynologyStitcher {
 				}
 			}
 		} catch (Exception ex) {
+			// Build 32 (issue #27): redacted before it is logged.
 			logger.warn("SynologyStitcher: VMWARE Datastore load failed: "
-					+ ex.getMessage());
+					+ SynologyRedaction.redact(ex.getMessage()));
 			index = Collections.emptyMap();
 		}
 		this.datastoresByPath = index;

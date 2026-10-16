@@ -4,7 +4,9 @@ package com.vcfcf.adapters.synology;
  * Secret redaction for anything that can reach the adapter log or a Test
  * Connection error (DEF-001, rules/no-secrets-on-disk.md). No VCF Ops SDK
  * and no framework-jar dependency, so the plain-main tests exercise exactly
- * the code the adapter runs. {@link SynologyApiClient} uses it.
+ * the code the adapter runs. {@link SynologyApiClient} uses it, and so do
+ * the Suite API WARN lines in {@link SynologyAdapter} and
+ * {@link SynologyStitcher} (build 32, issue #27).
  *
  * <p>Build 32 (issue #17): moved here from {@code SynologyApiClient.redact}
  * (same patterns) and joined by {@link #transportFailure}, which the API
@@ -21,7 +23,12 @@ final class SynologyRedaction {
 	 * error. The DSM entry.cgi URL carries the session id ({@code _sid}) on
 	 * every authenticated call and, on the login call, the URL-encoded
 	 * plaintext password and account ({@code passwd=}, {@code account=}).
-	 * Each value is masked up to the next {@code &} or the end of the text,
+	 * Build 32 (issue #27): also the Suite API shapes ({@code password=},
+	 * {@code username=} and {@code user=} parameters, JSON {@code username}, {@code password} and {@code token}
+	 * members, and an OpsToken, Bearer or Basic credential), for the
+	 * Suite API exception messages the adapter logs.
+	 * Each query parameter value is masked up to the next {@code &} or the
+	 * end of the text,
 	 * so a message that runs on after the URL loses its tail rather than
 	 * leaking. The api/version/method portion is left intact so the message
 	 * still identifies the failing endpoint.
@@ -33,7 +40,16 @@ final class SynologyRedaction {
 		return text
 				.replaceAll("(?i)(_sid=)[^&]*", "$1<redacted>")
 				.replaceAll("(?i)(passwd=)[^&]*", "$1<redacted>")
-				.replaceAll("(?i)(account=)[^&]*", "$1<redacted>");
+				.replaceAll("(?i)(account=)[^&]*", "$1<redacted>")
+				// Build 32 (issue #27): Suite API shapes. A form or query
+				// password or user, a JSON username, password or token member, and
+				// an OpsToken, Bearer or Basic credential.
+				.replaceAll("(?i)(password=|username=|user=)[^&]*",
+						"$1<redacted>")
+				.replaceAll("(?i)(\"(?:username|password|token)\"\\s*:\\s*\")"
+						+ "[^\"]*", "$1<redacted>")
+				.replaceAll("(?i)((?:vRealizeOpsToken|OpsToken|Bearer|Basic)"
+						+ "\\s+)[^\\s,;\"]+", "$1<redacted>");
 	}
 
 	/**

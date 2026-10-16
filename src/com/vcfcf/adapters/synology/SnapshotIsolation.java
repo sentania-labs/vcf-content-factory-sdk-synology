@@ -69,6 +69,25 @@ final class SnapshotIsolation {
 	}
 
 	/**
+	 * Build 32 (issue #20, review W1): throws when the NFS service reported
+	 * itself off this cycle, so no share was probed. An existing NFS export
+	 * object is then ERROR, with the reason, rather than collecting green
+	 * with the last rule values it published still on display. Its Volume
+	 * edge is dropped (Volumes are emitted with their known children
+	 * only). It stays ERROR until NFS is on again (or the
+	 * object is removed).
+	 */
+	static void requireNfsService(boolean nfsDisabled, String share)
+			throws IOException {
+		if (nfsDisabled) {
+			throw new IOException("NFS service is off on this NAS "
+					+ "(SYNO.Core.FileServ.NFS enable_nfs=false): share " + share
+					+ " is not an NFS export while it is off and its NFS rules "
+					+ "were not read; its Volume edge is dropped until NFS is on again");
+		}
+	}
+
+	/**
 	 * Which Volumes' children (LUNs from the LUN list, NFS exports from the
 	 * share list and the per-share NFS rule probes, SSD caches from
 	 * storage) are known this cycle. Own-adapter parents are full-set (the

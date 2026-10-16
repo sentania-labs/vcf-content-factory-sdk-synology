@@ -33,17 +33,20 @@ metric list):
 
 ### Metrics scope
 
-Roughly 130 metric and property keys across the nine kinds (see
+118 metric and property keys across the nine kinds, 98 distinct key
+names (keys such as `total_bytes` appear on several kinds; see
 `REFERENCE.md` for the authoritative list). Highlights:
 
-- **DiskStation** — system temperature, uptime, per-window CPU load,
-  memory usage, network RX/TX, NFS ops/latency/client-count.
-- **Pools / Volumes** — total/used/free capacity and usage %, plus volume
-  read/write throughput, IOPS, and utilization.
-- **Disks** — temperature, SMART status, uncorrectable sectors, remaining
-  life, and per-disk IO.
-- **iSCSI LUNs** — read/write IOPS, throughput, and latency.
-- **NFS exports** — used/logical size, quota usage %, active client count.
+- **DiskStation**: system temperature, uptime, 1, 5 and 15 minute load
+  averages, memory usage, network RX/TX, NFS ops/latency/client-count.
+- **Storage pools**: total capacity and the space allocated to volumes
+  (allocated and allocated %).
+- **Volumes**: total and free capacity and usage %, plus read/write
+  throughput, IOPS, and utilization.
+- **Disks**: temperature, SMART status, uncorrectable sectors, remaining
+  life (SSDs), and per-disk IO.
+- **iSCSI LUNs**: read/write IOPS, throughput, and latency.
+- **NFS exports**: used/logical size, quota usage %, active client count.
 
 ## Cross-Adapter Behavior
 
@@ -67,6 +70,15 @@ An edge is emitted **only when the computed path matches a Datastore that
 actually exists in inventory** — the adapter never mints phantom Datastore
 keys. Zero matches on a healthy Suite API connection is legitimate (no
 VMware datastore is backed by this NAS) and logged at INFO.
+
+The VMWARE Datastore list is read in pages of 1,000 until the Suite API's
+total count is reached (build 32; before, one request capped at 10,000
+datastores), and the path index built from it is kept for up to 30
+minutes. It is read again sooner when a LUN or export path that had not
+missed before finds no Datastore (a new LUN or export, or a Datastore
+created for one), at the next cycle. So a Datastore created for an
+existing, already unmatched LUN or export can take up to 30 minutes to
+get its edge.
 
 The cross-link is **optional and ambient**: it resolves foreign VMWARE
 Datastores over the local VCF Operations Suite API using the collector's

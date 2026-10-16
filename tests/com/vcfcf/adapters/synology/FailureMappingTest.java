@@ -22,6 +22,7 @@ import javax.net.ssl.SSLHandshakeException;
 public final class FailureMappingTest {
 
 	public static void main(String[] args) {
+		twoStepRefusalIsActionableAndBacksOff();
 		transportClassification();
 		unreachableIsDown();
 		wrappedUnreachableIsDown();
@@ -150,5 +151,24 @@ public final class FailureMappingTest {
 				"a certificate failure on one read does not stop the build");
 		T.check(!SynologyFailures.endsBuild(new IOException("HTTP 502")),
 				"an HTTP error does not stop the build");
+	}
+
+	/** Build 32 (issue #22): an OTP-required login says what to do, and backs off. */
+	static void twoStepRefusalIsActionableAndBacksOff() {
+		for (int code : new int[] {403, 404, 406}) {
+			String m = SynologyFailures.loginCodeMeaning(code);
+			T.check(m.contains("does not support 2-step verification"),
+					code + ": names the cause: " + m);
+			T.check(m.contains("dedicated DSM account without it"),
+					code + ": names the fix: " + m);
+			SynologyDsmException e = new SynologyDsmException(
+					"Synology login failed: error code " + code + " (" + m + ")",
+					code, true);
+			T.eq(code, SynologyFailures.authCode(e), code + ": login refusal path");
+			T.check(SynologyFailures.endsBuild(e), code + ": ends the build");
+			T.check(!SynologyFailures.isUnreachable(e), code + ": ERROR, not DOWN");
+		}
+		T.check(!SynologyFailures.loginCodeMeaning(400).contains("2-step"),
+				"a wrong password keeps its own wording");
 	}
 }

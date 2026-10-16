@@ -131,13 +131,55 @@ final class SynologyTopology {
 	}
 
 	static <J> String cacheName(Json<J> js, J cache, J storage) {
-		String mountSpaceId = orEmpty(js.str(js.get(cache, "mountSpaceId")));
-		for (J vol : js.list(js.get(data(js, storage), "volumes"))) {
-			if (mountSpaceId.equals(orEmpty(js.str(js.get(vol, "id"))))) {
-				return "SSD Cache (Volume " + js.num(js.get(vol, "num_id")) + ")";
-			}
+		J vol = volumeForCache(js, cache, js.list(js.get(data(js, storage), "volumes")));
+		return vol == null ? "SSD Cache"
+				: "SSD Cache (Volume " + js.num(js.get(vol, "num_id")) + ")";
+	}
+
+	/**
+	 * Build 32 (issue #25): the one SSD cache to Volume join, used by the
+	 * Volume's cache metrics, the SSD cache display name and the Volume to
+	 * SSD cache edge. The cache's {@code mountSpaceId} matches the volume's
+	 * {@code id} (id-based, the canonical key); only a cache without a
+	 * {@code mountSpaceId} falls back to its {@code path} matching the
+	 * volume's {@code vol_path}. Before build 32 the cache metrics joined by
+	 * path and the edge and name by {@code mountSpaceId}, so a NAS where the
+	 * two disagreed (or one was missing) could show cache metrics on a
+	 * Volume with no SSD cache child, or the reverse.
+	 *
+	 * @return the volume this cache serves, or {@code null}
+	 */
+	static <J> J volumeForCache(Json<J> js, J cache, List<J> volumes) {
+		for (J vol : volumes) {
+			if (serves(js, cache, vol)) return vol;
 		}
-		return "SSD Cache";
+		return null;
+	}
+
+	/**
+	 * Build 32 (issue #25): whether {@code cache} serves {@code vol}, by the
+	 * join {@link #volumeForCache} describes. Compares field values, never
+	 * node identity (a JSON wrapper may be rebuilt on every access).
+	 */
+	static <J> boolean serves(Json<J> js, J cache, J vol) {
+		String mountSpaceId = js.str(js.get(cache, "mountSpaceId"));
+		if (mountSpaceId != null && !mountSpaceId.isEmpty()) {
+			return same(mountSpaceId, js.str(js.get(vol, "id")));
+		}
+		String path = js.str(js.get(cache, "path"));
+		return path != null && !path.isEmpty()
+				&& same(path, js.str(js.get(vol, "vol_path")));
+	}
+
+	/**
+	 * Build 32 (issue #25): the SSD cache serving {@code vol}, by
+	 * {@link #serves} (the same join as the edge), or {@code null}.
+	 */
+	static <J> J cacheForVolume(Json<J> js, J vol, J storage) {
+		for (J cache : js.list(js.get(data(js, storage), "ssdCaches"))) {
+			if (serves(js, cache, vol)) return cache;
+		}
+		return null;
 	}
 
 	/**
@@ -275,22 +317,24 @@ final class SynologyTopology {
 			for (J cache : js.list(ssdCaches)) {
 				try {
 					String cacheId = js.str(js.get(cache, "id"));
-					String mountSpaceId = orEmpty(js.str(js.get(cache, "mountSpaceId")));
-					if (cacheId == null || cacheId.isEmpty() || mountSpaceId.isEmpty()) {
+					// Build 32 (issue #25): a cache needs a join key, its
+					// mountSpaceId or (without one) its path.
+					String joinKey = orEmpty(js.str(js.get(cache, "mountSpaceId")));
+					if (joinKey.isEmpty()) joinKey = orEmpty(js.str(js.get(cache, "path")));
+					if (cacheId == null || cacheId.isEmpty() || joinKey.isEmpty()) {
 						continue;
 					}
 					Obj cacheKey = new Obj("SynologySsdCache",
 							cacheName(js, cache, in.storage), "cache_id", cacheId);
 					if (!in.volumeChildren.noneKnown()) {
-						for (J vol : volumes) {
-							if (mountSpaceId.equals(orEmpty(js.str(js.get(vol, "id"))))) {
-								String volId = volumeId(js, vol);
-								if (volId == null || !in.volumeChildren.known(
-										js.str(js.get(vol, "vol_path")))) break;
+						J vol = volumeForCache(js, cache, volumes);
+						if (vol != null) {
+							String volId = volumeId(js, vol);
+							if (volId != null && in.volumeChildren.known(
+									js.str(js.get(vol, "vol_path")))) {
 								out.parent(new Obj("SynologyVolume",
 										volumeName(js, vol), "volume_id", volId),
 										cacheKey);
-								break;
 							}
 						}
 					}

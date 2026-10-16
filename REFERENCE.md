@@ -55,9 +55,9 @@ Generated from `describe.xml` and `resources.properties` for build 1.0.0.16.
 
 | Key | Label | Type | Unit | Monitored |
 |---|---|---|---|---|
-| `cpu_load_1m` | CPU Load (1 min) | metric | % | yes |
-| `cpu_load_5m` | CPU Load (5 min) | metric | % | yes |
-| `cpu_load_15m` | CPU Load (15 min) | metric | % | yes |
+| `cpu_load_1m` | Load Average (1 min) | metric | none | yes |
+| `cpu_load_5m` | Load Average (5 min) | metric | none | yes |
+| `cpu_load_15m` | Load Average (15 min) | metric | none | yes |
 | `cpu_user_pct` | CPU User % | metric | % | yes |
 | `cpu_system_pct` | CPU System % | metric | % | yes |
 | `cpu_total_load` | CPU Total Load | metric | % | yes |
@@ -111,8 +111,8 @@ Generated from `describe.xml` and `resources.properties` for build 1.0.0.16.
 | Key | Label | Type | Unit | Monitored |
 |---|---|---|---|---|
 | `total_bytes` | Total | metric | bytes | yes |
-| `used_bytes` | Used | metric | bytes | yes |
-| `usage_pct` | Usage % | metric | % | yes |
+| `used_bytes` | Allocated | metric | bytes | yes |
+| `usage_pct` | Allocated % | metric | % | yes |
 
 #### Configuration
 

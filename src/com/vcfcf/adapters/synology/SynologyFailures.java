@@ -175,15 +175,32 @@ final class SynologyFailures {
 		}
 	}
 
-	/** Operator wording for a DSM login error code, or "" when unknown. */
+	/**
+	 * Build 32 (issue #22): what the 2-step verification refusals add, so
+	 * the operator knows the fix rather than a code. The adapter cannot
+	 * answer a one-time code; retrying cannot succeed.
+	 */
+	static final String TWO_STEP_ADVICE = ": this adapter does not support "
+			+ "2-step verification; use a dedicated DSM account without it "
+			+ "(see docs/installing.md). Not retried until the back-off ends "
+			+ "or the instance is edited";
+
+	/**
+	 * Operator wording for a DSM login error code, or "" when unknown.
+	 * Build 32 (issue #22): the 2-step verification codes (403, 404, 406)
+	 * carry {@link #TWO_STEP_ADVICE}. They are authentication-class
+	 * refusals ({@link #isAuthCode}), so they take the same login back-off
+	 * as a wrong password.
+	 */
 	static String loginCodeMeaning(int code) {
 		switch (code) {
 			case 400: return "no such account or incorrect password";
 			case 401: return "account disabled";
 			case 402: return "permission denied";
-			case 403: return "2-step verification code required";
-			case 404: return "2-step verification failed";
-			case 406: return "2-step verification must be set up for this account";
+			case 403: return "2-step verification code required" + TWO_STEP_ADVICE;
+			case 404: return "2-step verification failed" + TWO_STEP_ADVICE;
+			case 406: return "2-step verification must be set up for this account"
+					+ TWO_STEP_ADVICE;
 			case 407: return "source IP blocked by DSM Auto Block";
 			case 408: return "password expired and cannot be changed";
 			case 409: return "password expired";

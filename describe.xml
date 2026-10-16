@@ -67,11 +67,11 @@
 
 			<ResourceGroup key="CPU" nameKey="30" instanced="false">
 				<ResourceAttribute key="cpu_load_1m" nameKey="31" dataType="float"
-				                   isProperty="false" defaultMonitored="true" unit="%"/>
+				                   isProperty="false" defaultMonitored="true"/>
 				<ResourceAttribute key="cpu_load_5m" nameKey="32" dataType="float"
-				                   isProperty="false" defaultMonitored="true" unit="%"/>
+				                   isProperty="false" defaultMonitored="true"/>
 				<ResourceAttribute key="cpu_load_15m" nameKey="33" dataType="float"
-				                   isProperty="false" defaultMonitored="true" unit="%"/>
+				                   isProperty="false" defaultMonitored="true"/>
 				<ResourceAttribute key="cpu_user_pct" nameKey="34" dataType="float"
 				                   isProperty="false" defaultMonitored="true" unit="%"/>
 				<ResourceAttribute key="cpu_system_pct" nameKey="35" dataType="float"

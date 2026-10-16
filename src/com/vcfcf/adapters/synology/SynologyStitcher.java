@@ -63,6 +63,20 @@ public final class SynologyStitcher {
 	 */
 	private Map<String, List<ResourceKey>> datastoresByPath = Collections.emptyMap();
 
+	/**
+	 * Build 32 (issue #28): the Datastore path index is kept for up to
+	 * this long (or until a new path misses) instead of being reloaded
+	 * every relationship cycle.
+	 */
+	static final long INDEX_TTL_MS = 30L * 60_000L;
+
+	/** Build 32 (issue #28): when the index is loaded again. */
+	private final DatastoreIndex.ReloadPolicy reload =
+			new DatastoreIndex.ReloadPolicy(System::currentTimeMillis, INDEX_TTL_MS);
+
+	/** Build 32 (issue #28): the Datastore count of the last load. */
+	private volatile int lastTotal;
+
 	public SynologyStitcher(SuiteApiStitcher stitcher, Logger logger) {
 		this.logger = logger;
 		this.bridge = new SuiteApiDatastoreBridge(stitcher, logger);
@@ -84,14 +98,30 @@ public final class SynologyStitcher {
 	 * construction (name/kind/adapterKind + per-identifier uniqueness flags).
 	 */
 	public int loadDatastores() {
+		// Build 32 (issue #28): reuse the index while it is fresh.
+		if (!reload.beginCycle()) {
+			logger.info("SynologyStitcher: reusing the VMWARE Datastore index ("
+					+ lastTotal + " Datastores, loaded "
+					+ (reload.ageMs() / 60_000L) + " min ago; reloaded every "
+					+ (INDEX_TTL_MS / 60_000L) + " min or when a new path misses)");
+			return lastTotal;
+		}
 		Map<String, List<ResourceKey>> index = new HashMap<>();
+		boolean ok = false;
 		int total = 0;
+		java.util.Set<String> seen = new java.util.HashSet<>();
 		try {
 			List<ForeignResourceResolver.ResourceEntry> entries =
 					bridge.listResources("VMWARE", "Datastore");
 			if (entries != null) {
 				for (ForeignResourceResolver.ResourceEntry e : entries) {
 					if (e == null) continue;
+					// Review N3: a row returned twice across a page boundary
+					// is counted and indexed once (round 2: the count too).
+					if (!DatastoreIndex.firstSighting(seen, "", e.name,
+							e.identifiers)) {
+						continue;
+					}
 					total++;
 					ResourceKey key = new ResourceKey(e.name, e.resourceKind,
 							e.adapterKind);
@@ -112,12 +142,20 @@ public final class SynologyStitcher {
 					}
 				}
 			}
+			ok = true;
 		} catch (Exception ex) {
+			// Build 32 (issue #27): redacted before it is logged.
 			logger.warn("SynologyStitcher: VMWARE Datastore load failed: "
-					+ ex.getMessage());
+					+ SynologyRedaction.redact(ex.getMessage()));
 			index = Collections.emptyMap();
 		}
 		this.datastoresByPath = index;
+		this.lastTotal = ok ? total : 0;
+		if (ok) {
+			reload.loaded();
+		} else {
+			reload.failed();
+		}
 		int keyCount = 0;
 		for (List<ResourceKey> l : index.values()) keyCount += l.size();
 		logger.info("SynologyStitcher: loaded " + total + " VMWARE Datastores, "
@@ -137,7 +175,14 @@ public final class SynologyStitcher {
 			return Collections.emptyList();
 		}
 		List<ResourceKey> matches = datastoresByPath.get(dataStorePath);
-		return matches != null ? matches : Collections.emptyList();
+		// Build 32 (issue #28): a new path that misses reloads the index
+		// next cycle (a Datastore may have been created for it).
+		if (matches != null && !matches.isEmpty()) {
+			reload.hit(dataStorePath);
+			return matches;
+		}
+		reload.miss(dataStorePath);
+		return Collections.emptyList();
 	}
 
 	/**
@@ -218,14 +263,16 @@ public final class SynologyStitcher {
 				String adapterKind, String resourceKind) throws Exception {
 			List<ForeignResourceResolver.ResourceEntry> out = new ArrayList<>();
 			String enc = java.net.URLEncoder.encode(resourceKind, "UTF-8");
-			String body = stitcher.get("/api/resources?adapterKind="
+			String base = "/api/resources?adapterKind="
 					+ java.net.URLEncoder.encode(adapterKind, "UTF-8")
-					+ "&resourceKind=" + enc + "&pageSize=10000");
-			SimpleJson parsed = SimpleJson.parse(body);
-			if (parsed == null || parsed.isNull()) return out;
-			SimpleJson list = parsed.get("resourceList");
-			if (list == null || !list.isList()) return out;
-			for (SimpleJson r : list.asList()) {
+					+ "&resourceKind=" + enc;
+			// Build 32 (issue #28): paged (page size DatastoreIndex.PAGE_SIZE,
+			// until pageInfo.totalCount) instead of one pageSize=10000 call.
+			List<SimpleJson> rows = DatastoreIndex.fetchAll(SynologyAdapter.SJ,
+					(page, size) -> SimpleJson.parse(stitcher.get(base
+							+ "&page=" + page + "&pageSize=" + size)),
+					DatastoreIndex.PAGE_SIZE, logger::warn);
+			for (SimpleJson r : rows) {
 				if (r == null || r.isNull()) continue;
 				SimpleJson key = r.get("resourceKey");
 				if (key == null || key.isNull()) continue;

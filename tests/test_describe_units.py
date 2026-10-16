@@ -48,6 +48,11 @@ EXPECT = [
 
 
 def main():
+    # issue #29: the SSD cache total_capacity property divides by 1024^3
+    adapter = (ROOT / "src/com/vcfcf/adapters/synology/SynologyAdapter.java").read_text()
+    assert '"%.1f GiB", totalBytes / (1024.0 * 1024.0 * 1024.0)' in adapter, \
+        "total_capacity is not labelled GiB"
+    assert '"%.1f GB"' not in adapter, "a GB label on a 1024^3 division is back"
     for kind, key, unit, name in EXPECT:
         a = attr(kind, key)
         assert a.get("unit") == unit, f"{kind}.{key}: unit {a.get('unit')!r}, want {unit!r}"

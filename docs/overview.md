@@ -33,7 +33,8 @@ metric list):
 
 ### Metrics scope
 
-Roughly 130 metric and property keys across the nine kinds (see
+118 metric and property keys across the nine kinds, 98 distinct key
+names (keys such as `total_bytes` appear on several kinds; see
 `REFERENCE.md` for the authoritative list). Highlights:
 
 - **DiskStation** — system temperature, uptime, per-window CPU load,

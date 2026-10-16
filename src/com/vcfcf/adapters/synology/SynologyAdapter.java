@@ -1049,8 +1049,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 		prop(out, "Hardware|disk_members", members.toString());
 		double totalBytes = size.get("total").asDouble();
+		// Build 32 (issue #29): divided by 1024^3, so the unit is GiB (it
+		// was labelled GB).
 		prop(out, "Hardware|total_capacity",
-				String.format("%.1f GB", totalBytes / (1024.0 * 1024.0 * 1024.0)));
+				String.format("%.1f GiB", totalBytes / (1024.0 * 1024.0 * 1024.0)));
 		prop(out, "Hardware|disk_failure_count",
 				String.valueOf(cache.get("disk_failure_number").asLong()));
 	}

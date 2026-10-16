@@ -133,8 +133,22 @@ an administrators-group account (see above).
 |------|----------|-----------|---------|
 | 5001 | HTTPS    | Collector → DiskStation | DSM Web API (system, storage, iSCSI, NFS, UPS reads) |
 
-The optional Datastore cross-link uses the **ambient** local Suite API on
-the collector and requires no additional outbound network configuration.
+The optional Datastore cross-link reads VMWARE Datastores from the VCF
+Operations Suite API, by one of two paths:
+
+- **Ambient (default, the three Suite API fields blank):** the local
+  Suite API on the node that runs the instance, with that node's own
+  credentials. No extra network configuration. It works on the primary or
+  an analytics node; on a remote collector or Cloud Proxy it usually reads
+  nothing, and the cross-link is skipped with one WARN.
+- **Explicit (remote collector or Cloud Proxy):** set the Suite API URL
+  to the **primary or analytics node FQDN** and a Suite API username and
+  password (credential fields below). The collector then needs outbound
+  **HTTPS (TCP 443) to that node**:
+
+| Port | Protocol | Direction | Purpose |
+|------|----------|-----------|---------|
+| 443 | HTTPS | Collector or Cloud Proxy → VCF Operations primary/analytics node | Suite API, explicit Datastore cross-link only |
 
 ## TLS — certificate trust
 
@@ -196,6 +210,14 @@ for:
 | Allow Insecure SSL (true/false) | `allowInsecure` | No | false | `true` turns off certificate validation for the NAS (lab use only). Any other value validates. |
 | Username | `username` | Yes | — | DSM account with API access. |
 | Password | `password` | Yes | — | DSM account password (masked). |
+| VCF Ops Suite API URL | `vrops_url` | No | blank | Remote collector or Cloud Proxy only: the primary or analytics node FQDN (a full URL, a bare host or `host:port`). Used only when the username and password below are both set. |
+| VCF Ops Suite API Username | `vrops_username` | No | blank | Remote collector only: a VCF Operations account that can read VMWARE Datastores. Not written to the adapter log. |
+| VCF Ops Suite API Password | `vrops_password` | No | blank | Remote collector only (masked). |
+
+Username, password and the three Suite API fields are on the
+credential; leave the Suite API fields blank on a primary or analytics
+node (the ambient path). See Network Requirements for the explicit
+path's HTTPS requirement.
 
 ## Step-by-Step Installation
 

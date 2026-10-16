@@ -24,11 +24,12 @@ final class SynologyRedaction {
 	 * every authenticated call and, on the login call, the URL-encoded
 	 * plaintext password and account ({@code passwd=}, {@code account=}).
 	 * Build 32 (issue #27): also the Suite API shapes ({@code password=},
-	 * {@code username=} and {@code user=} parameters, JSON {@code username}, {@code password} and {@code token}
-	 * members, and an OpsToken, Bearer or Basic credential), for the
-	 * Suite API exception messages the adapter logs.
-	 * Each query parameter value is masked up to the next {@code &} or the
-	 * end of the text,
+	 * {@code username=}, {@code user=}, {@code token=} and
+	 * {@code principal=} parameters, URL userinfo, JSON {@code username},
+	 * {@code password}, {@code token} and {@code authToken} members, and an
+	 * OpsToken, Bearer or Basic credential), for the Suite API exception
+	 * messages the adapter logs. Each query parameter value is masked up to
+	 * the next {@code &} or the end of the text,
 	 * so a message that runs on after the URL loses its tail rather than
 	 * leaking. The api/version/method portion is left intact so the message
 	 * still identifies the failing endpoint.
@@ -42,12 +43,16 @@ final class SynologyRedaction {
 				.replaceAll("(?i)(passwd=)[^&]*", "$1<redacted>")
 				.replaceAll("(?i)(account=)[^&]*", "$1<redacted>")
 				// Build 32 (issue #27): Suite API shapes. A form or query
-				// password or user, a JSON username, password or token member, and
-				// an OpsToken, Bearer or Basic credential.
-				.replaceAll("(?i)(password=|username=|user=)[^&]*",
+				// password, user, token or principal (the framework Suite API
+				// client ends its 401 and token messages in principal=<user>),
+				// a JSON username, password, token or authToken member
+				// (escaped quotes included), URL userinfo (user:pass@), and an
+				// OpsToken, Bearer or Basic credential.
+				.replaceAll("(?i)(password=|username=|user=|token=|principal=)[^&]*",
 						"$1<redacted>")
-				.replaceAll("(?i)(\"(?:username|password|token)\"\\s*:\\s*\")"
-						+ "[^\"]*", "$1<redacted>")
+				.replaceAll("(?i)(\"(?:username|password|token|authToken)\"\\s*:\\s*\")"
+						+ "(?:[^\"\\\\]|\\\\.)*", "$1<redacted>")
+				.replaceAll("(?i)(://)[^/\\s@]+@", "$1<redacted>@")
 				.replaceAll("(?i)((?:vRealizeOpsToken|OpsToken|Bearer|Basic)"
 						+ "\\s+)[^\\s,;\"]+", "$1<redacted>");
 	}

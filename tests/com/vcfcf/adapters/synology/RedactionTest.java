@@ -23,6 +23,7 @@ public final class RedactionTest {
 		ioExceptionKeepsBuild31Shape();
 		wrappedConnectFailureStillDown();
 		suiteApiShapesAreMasked();
+		frameworkPrincipalAndReviewShapesAreMasked();
 		System.out.println("RedactionTest: all assertions passed");
 	}
 
@@ -96,5 +97,36 @@ public final class RedactionTest {
 		T.check(r.contains("401"), "suite api: status kept: " + r);
 		T.check(r.contains("/suite-api/api/auth/token/acquire"),
 				"suite api: path kept: " + r);
+	}
+
+	/**
+	 * Review B1 and N1 on build 32: the framework Suite API client's 401 and
+	 * token messages end in principal=<user>; plus token=, authToken, URL
+	 * userinfo, an escaped quote inside a JSON value, and user= alone.
+	 */
+	static void frameworkPrincipalAndReviewShapesAreMasked() {
+		String fw401 = "Suite API GET https://ops.example/suite-api/api/resources"
+				+ "?adapterKind=VMWARE returned 401, token expired or credential"
+				+ " invalid mechanism=explicit principal=svc-vcfops";
+		String r = SynologyRedaction.redact(fw401);
+		T.check(!r.contains("svc-vcfops"), "401 principal leaked: " + r);
+		T.check(r.contains("returned 401"), "401 status kept: " + r);
+		String tok = SynologyRedaction.redact("Suite API token/acquire: no 'token' "
+				+ "field in response mechanism=explicit principal=svc-vcfops");
+		T.check(!tok.contains("svc-vcfops"), "token principal leaked: " + tok);
+		String[][] cases = {
+				{"GET /x?token=TOK999&a=1", "TOK999"},
+				{"body {\"authToken\":\"AUTH999\"}", "AUTH999"},
+				{"https://svc:PW999@ops.example/suite-api", "PW999"},
+				{"https://svc:PW999@ops.example/suite-api", "svc:"},
+				{"{\"password\":\"ab\\\"cdSECRET\"}", "cdSECRET"},
+				{"form user=svc-only", "svc-only"},
+		};
+		for (String[] c : cases) {
+			String m = SynologyRedaction.redact(c[0]);
+			T.check(!m.contains(c[1]), c[1] + " leaked from <" + c[0] + ">: " + m);
+		}
+		T.check(SynologyRedaction.redact("https://ops.example/suite-api/api")
+				.equals("https://ops.example/suite-api/api"), "a plain URL is kept");
 	}
 }

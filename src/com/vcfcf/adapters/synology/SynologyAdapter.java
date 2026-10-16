@@ -1343,8 +1343,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		return rb.resource(o.kind, o.name, o.idKey, o.id);
 	}
 
-	/** Build 31 (issue #19): {@link SynologyTopology}'s view of {@link SimpleJson}. */
-	private static final SynologyTopology.Json<SimpleJson> SJ =
+	/**
+	 * Build 31 (issue #19): {@link SynologyTopology}'s view of
+	 * {@link SimpleJson}. Build 32 (issue #28): package-private, so
+	 * {@link SynologyStitcher} pages the Suite API with it too.
+	 */
+	static final SynologyTopology.Json<SimpleJson> SJ =
 			new SynologyTopology.Json<SimpleJson>() {
 				@Override
 				public SimpleJson get(SimpleJson node, String key) {

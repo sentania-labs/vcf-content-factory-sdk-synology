@@ -68,6 +68,15 @@ actually exists in inventory** — the adapter never mints phantom Datastore
 keys. Zero matches on a healthy Suite API connection is legitimate (no
 VMware datastore is backed by this NAS) and logged at INFO.
 
+The VMWARE Datastore list is read in pages of 1,000 until the Suite API's
+total count is reached (build 32; before, one request capped at 10,000
+datastores), and the path index built from it is kept for up to 30
+minutes. It is read again sooner when a LUN or export path that had not
+missed before finds no Datastore (a new LUN or export, or a Datastore
+created for one), at the next cycle. So a Datastore created for an
+existing, already unmatched LUN or export can take up to 30 minutes to
+get its edge.
+
 The cross-link is **optional and ambient**: it resolves foreign VMWARE
 Datastores over the local VCF Operations Suite API using the collector's
 ambient credentials. On a collector where the Suite API is unavailable, the

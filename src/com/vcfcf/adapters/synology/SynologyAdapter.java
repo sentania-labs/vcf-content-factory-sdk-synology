@@ -940,18 +940,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			metric(out, "IO|utilization_pct", io.get("utilization").asDouble());
 		}
 
-		// Cache hit rates on Volume (from ssdCaches[] matched by path == vol_path)
-		SimpleJson ssdCaches = s.storage.data().get("ssdCaches");
-		if (!ssdCaches.isNull()) {
-			for (SimpleJson cache : ssdCaches.asList()) {
-				if (volPath.equals(cache.get("path").asString(""))) {
-					prop(out, "Cache|cache_enabled", "true");
-					prop(out, "Cache|cache_status", cache.get("status").asString(""));
-					metric(out, "Cache|cache_read_hit_rate", cache.get("hit_rate").asDouble());
-					metric(out, "Cache|cache_write_hit_rate", cache.get("hit_rate_write").asDouble());
-					break;
-				}
-			}
+		// Cache hit rates on Volume. Build 32 (issue #25): the same join as
+		// the Volume to SSD cache edge (mountSpaceId == volume id, path only
+		// when the cache has no mountSpaceId); before, this joined by path.
+		SimpleJson cache = SynologyTopology.cacheForVolume(SJ, vol, s.storage);
+		if (cache != null) {
+			prop(out, "Cache|cache_enabled", "true");
+			prop(out, "Cache|cache_status", cache.get("status").asString(""));
+			metric(out, "Cache|cache_read_hit_rate", cache.get("hit_rate").asDouble());
+			metric(out, "Cache|cache_write_hit_rate", cache.get("hit_rate_write").asDouble());
 		}
 	}
 

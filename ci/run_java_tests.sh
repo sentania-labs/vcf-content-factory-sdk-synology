@@ -15,10 +15,11 @@ javac -d "$out" -sourcepath src:tests \
     tests/com/vcfcf/adapters/synology/*.java
 for t in AllowInsecureTest SnapshotCacheTest SnapshotTimingTest \
         FailureMappingTest SnapshotReadsTest SnapshotIsolationTest NfsProbesTest \
-        DsmSessionTest TeardownTest TopologyTest RedactionTest; do
+        DsmSessionTest TeardownTest TopologyTest RedactionTest SessionNameTest; do
     java -cp "$out" "com.vcfcf.adapters.synology.$t"
 done
 python3 tests/test_allow_insecure_default.py
 python3 tests/test_snapshot_logger_once.py
 python3 tests/test_logout_client_discard.py
 python3 tests/test_suite_api_log_redaction.py
+python3 tests/test_session_name_wiring.py

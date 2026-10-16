@@ -83,6 +83,37 @@ public final class SynologyConfig {
 				+ "/");
 	}
 
+	/** Build 32 (issue #23): the prefix of every DSM session name this pak uses. */
+	static final String SESSION_PREFIX = "VCFContentFactory";
+
+	/**
+	 * Build 32 (issue #23): the DSM session name of one API client. Before
+	 * build 32 every instance and the Test Connection client used the one
+	 * name {@code VCFContentFactory}; DSM groups sessions by name, so a
+	 * logout from one client (Test Connection, an edit, a removal) could
+	 * end the session another instance was still using against the same
+	 * NAS and force re-logins. Now a collecting instance uses
+	 * {@code VCFContentFactory-<adapterInstanceId>} (or
+	 * {@code VCFContentFactory-<random>} when the platform gave no id), and
+	 * Test Connection uses {@code VCFContentFactory-test-<random>}, distinct
+	 * from every instance and from every other test.
+	 *
+	 * @param instanceId the adapter instance id, or {@code null}
+	 * @param test       true for the Test Connection client
+	 * @param random     a short random token (letters and digits)
+	 */
+	static String sessionName(Integer instanceId, boolean test, String random) {
+		if (test) return SESSION_PREFIX + "-test-" + random;
+		return SESSION_PREFIX + "-" + (instanceId != null
+				? String.valueOf(instanceId) : random);
+	}
+
+	/** Build 32 (issue #23): an 8-character random token for {@link #sessionName}. */
+	static String randomToken() {
+		return java.util.UUID.randomUUID().toString().replace("-", "")
+				.substring(0, 8);
+	}
+
 	/**
 	 * Build 31 (issue #15): the WARN logged on every configure while insecure
 	 * mode is on, or {@code null} when the NAS certificate is validated. No

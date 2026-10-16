@@ -28,8 +28,6 @@ import java.net.http.HttpResponse;
  */
 public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson> {
 
-	private static final String SESSION_NAME = "VCFContentFactory";
-
 	private final ManagedHttpClient http;
 	/**
 	 * Build 31 (review W5): the client the logout goes over. For a collect
@@ -44,18 +42,24 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	private final Logger log;
 	/** Build 31 (review W5): session id and closed flag; see {@link DsmSession}. */
 	private final DsmSession session;
+	/**
+	 * Build 32 (issue #23): this client's DSM session name, per instance (or
+	 * per Test Connection); see {@link SynologyConfig#sessionName}.
+	 */
+	private final String sessionName;
 
 	public SynologyApiClient(ManagedHttpClient http, String username,
-			String password, Logger log) {
-		this(http, http, username, password, log);
+			String password, String sessionName, Logger log) {
+		this(http, http, username, password, sessionName, log);
 	}
 
 	public SynologyApiClient(ManagedHttpClient http, ManagedHttpClient logoutHttp,
-			String username, String password, Logger log) {
+			String username, String password, String sessionName, Logger log) {
 		this.http = http;
 		this.logoutHttp = logoutHttp;
 		this.username = username;
 		this.password = password;
+		this.sessionName = sessionName;
 		this.log = log;
 		// Codex P2: a dedicated logout client is discarded on close (after
 		// the logout attempt, with or without a session). When it is the
@@ -80,7 +84,7 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 		String path = synoUrl("SYNO.API.Auth", 7, "login",
 				"account=" + urlEncode(username),
 				"passwd=" + urlEncode(password),
-				"session=" + SESSION_NAME,
+				"session=" + urlEncode(sessionName),
 				"format=sid");
 		SimpleJson resp = callRaw(path, "SYNO.API.Auth login");
 		if (!resp.isSuccess()) {
@@ -95,7 +99,7 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 					code, true);
 		}
 		String sid = resp.data().get("sid").asString();
-		log.info("Synology login succeeded, session=" + SESSION_NAME);
+		log.info("Synology login succeeded, session=" + sessionName);
 		return sid;
 	}
 
@@ -117,8 +121,10 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 
 	private void sendLogout(String sid) {
 		try {
+			// Build 32 (issue #23): this client's own session name, and its
+			// _sid (synoUrl adds it), so only this client's session ends.
 			callRaw(logoutHttp, synoUrl(sid, "SYNO.API.Auth", 7, "logout",
-					"session=" + SESSION_NAME), "SYNO.API.Auth logout");
+					"session=" + urlEncode(sessionName)), "SYNO.API.Auth logout");
 		} catch (InterruptedException ie) {
 			Thread.currentThread().interrupt();
 			log.warn("Logout interrupted (non-fatal)");

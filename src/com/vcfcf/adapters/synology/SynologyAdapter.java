@@ -170,12 +170,20 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 	}
 
+	/**
+	 * Build 32 (issue #23): the platform's adapter instance id, for this
+	 * instance's DSM session name; {@code null} on a bare instance.
+	 */
+	private final Integer instanceId;
+
 	public SynologyAdapter() {
 		super(ADAPTER_KIND);
+		this.instanceId = null;
 	}
 
 	public SynologyAdapter(String adapterDir, Integer adapterInstanceId) {
 		super(ADAPTER_KIND, adapterDir, adapterInstanceId);
+		this.instanceId = adapterInstanceId;
 	}
 
 	// -----------------------------------------------------------------------
@@ -216,6 +224,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				new SynologyApiClient(httpClient,
 						buildHttpClient(cfg, 1, LOGOUT_TIMEOUT),
 						cfg.username, cfg.password,
+						// Build 32 (issue #23): one DSM session name per instance.
+						SynologyConfig.sessionName(instanceId, false,
+								SynologyConfig.randomToken()),
 						componentLogger(SynologyApiClient.class)),
 				snapshotLog,
 				new SnapshotCache<>(System::currentTimeMillis,
@@ -420,8 +431,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			SynologyConfig testCfg = buildConfig(rc);
 			ManagedHttpClient testHttp = buildHttpClient(testCfg);
 			try {
+				// Build 32 (issue #23): a session name of its own, so the
+				// test's logout never ends a collecting instance's session.
 				SynologyApiClient testApi = new SynologyApiClient(
 						testHttp, testCfg.username, testCfg.password,
+						SynologyConfig.sessionName(null, true,
+								SynologyConfig.randomToken()),
 						componentLogger(SynologyApiClient.class));
 				testApi.login();
 				try {

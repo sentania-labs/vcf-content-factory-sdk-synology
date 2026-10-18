@@ -81,8 +81,9 @@ final class SynologyMetrics {
 	 * Issue #41: a {@code SYNO.Core.System.Utilization} load average
 	 * ({@code cpu.1min_load}, {@code 5min_load}, {@code 15min_load}) as the
 	 * Unix run-queue length, or {@code null} when DSM did not send it. DSM
-	 * scales the load averages by 100, so the value is divided by 100: the
-	 * build 32 devel_9_1 proof (factory knowledge/context/investigations/
+	 * scales the load averages by 100, so the value is divided by 100. The
+	 * scale is derived, not compared against /proc/loadavg: the build 32
+	 * devel_9_1 proof (factory knowledge/context/investigations/
 	 * 2026-10-16-synology-32-devel-9-1-proof.md, item 4) saw 473 / 280 / 138
 	 * on a 4-core DS1520+ at 98 % CPU, a real 1-minute load of 4.73. Builds
 	 * up to 32 published DSM's value as sent, 100 times too large, and a

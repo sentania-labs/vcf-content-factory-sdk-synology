@@ -76,6 +76,16 @@ def main():
     assert re.search(r"Double totalBytes = SynologyMetrics\.num\(SJ, size\.get\(\"total\"\)\);"
                      r"\s*if \(totalBytes != null\)\s*\{\s*prop\(out, \"Hardware\|total_capacity\"",
                      cache), "total_capacity is published without a size.total"
+    # Build 33 review W1 (issue #41): each load average goes through the
+    # helper that divides by 100 once, from its own field, and only there.
+    for key, field in (("CPU|cpu_load_1m", "1min_load"),
+                       ("CPU|cpu_load_5m", "5min_load"),
+                       ("CPU|cpu_load_15m", "15min_load")):
+        assert re.search(r'metricIfPresent\(out, "' + re.escape(key) + r'",\s*'
+                         r'SynologyMetrics\.loadAverage\(SJ, cpu, "' + field + r'"\)\);',
+                         ADAPTER), f"{key} is not published through loadAverage from {field}"
+        assert ADAPTER.count('"' + key + '"') == 1, \
+            f"{key} is published somewhere else too"
     print("test_collect_wiring: all assertions passed")
 
 

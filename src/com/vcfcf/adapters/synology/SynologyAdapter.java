@@ -828,11 +828,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson cpu = util.data().get("cpu");
 		// Build 32 (issue #24): Unix-style load averages (run-queue length),
 		// unitless, not percent. Build 33 (issue #41): DSM scales them by
-		// 100, confirmed by the build 32 devel_9_1 proof (factory
+		// 100, derived in the build 32 devel_9_1 proof (factory
 		// knowledge/context/investigations/
-		// 2026-10-16-synology-32-devel-9-1-proof.md, item 4: 473 / 280 / 138
-		// on a 4-core DS1520+ at 98 % CPU, a real 1-minute load of 4.73), so
-		// they are divided by 100 and skipped when DSM did not send them.
+		// 2026-10-16-synology-32-devel-9-1-proof.md, item 4) from 473 / 280 /
+		// 138 on a 4-core DS1520+ at 98 % CPU (a real 1-minute load of 4.73;
+		// not compared against /proc/loadavg), so they are divided by 100
+		// and skipped when DSM did not send them.
 		// See SynologyMetrics.loadAverage.
 		metricIfPresent(out, "CPU|cpu_load_1m",
 				SynologyMetrics.loadAverage(SJ, cpu, "1min_load"));

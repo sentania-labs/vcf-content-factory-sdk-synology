@@ -63,7 +63,9 @@ def main():
     assert re.search(r"metricIfPresent\(out, \"Memory\|memory_usage_pct\",\s*"
                      r"SynologyMetrics\.memoryUsagePct\(SJ, mem\)\);", ADAPTER), \
         "memory_usage_pct is not published through memoryUsagePct"
-    assert ADAPTER.count("\"Memory|memory_usage_pct\"") == 1, \
+    # Build 33 review round 2: count the bare key with its closing quote, so
+    # a second publish that builds the key from two strings is caught too.
+    assert ADAPTER.count('memory_usage_pct"') == 1, \
         "memory_usage_pct is published somewhere else too"
     # Peer review: Volume cache hit rates and SSD cache total_capacity are
     # published only when DSM sent the field.
@@ -84,7 +86,7 @@ def main():
         assert re.search(r'metricIfPresent\(out, "' + re.escape(key) + r'",\s*'
                          r'SynologyMetrics\.loadAverage\(SJ, cpu, "' + field + r'"\)\);',
                          ADAPTER), f"{key} is not published through loadAverage from {field}"
-        assert ADAPTER.count('"' + key + '"') == 1, \
+        assert ADAPTER.count(key.split("|", 1)[1] + '"') == 1, \
             f"{key} is published somewhere else too"
     print("test_collect_wiring: all assertions passed")
 

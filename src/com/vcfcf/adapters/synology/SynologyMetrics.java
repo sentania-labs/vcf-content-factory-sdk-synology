@@ -74,6 +74,27 @@ final class SynologyMetrics {
 	}
 
 	// -----------------------------------------------------------------------
+	// Issue #41: load averages
+	// -----------------------------------------------------------------------
+
+	/**
+	 * Issue #41: a {@code SYNO.Core.System.Utilization} load average
+	 * ({@code cpu.1min_load}, {@code 5min_load}, {@code 15min_load}) as the
+	 * Unix run-queue length, or {@code null} when DSM did not send it. DSM
+	 * scales the load averages by 100, so the value is divided by 100: the
+	 * build 32 devel_9_1 proof (factory knowledge/context/investigations/
+	 * 2026-10-16-synology-32-devel-9-1-proof.md, item 4) saw 473 / 280 / 138
+	 * on a 4-core DS1520+ at 98 % CPU, a real 1-minute load of 4.73. Builds
+	 * up to 32 published DSM's value as sent, 100 times too large, and a
+	 * missing field as 0.
+	 */
+	static <J> Double loadAverage(SynologyTopology.Json<J> js, J cpu,
+			String field) {
+		Double scaled = num(js, js.get(cpu, field));
+		return scaled == null ? null : scaled / 100.0;
+	}
+
+	// -----------------------------------------------------------------------
 	// Issue #18: network totals
 	// -----------------------------------------------------------------------
 

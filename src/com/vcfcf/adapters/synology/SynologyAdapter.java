@@ -827,13 +827,19 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 		SimpleJson cpu = util.data().get("cpu");
 		// Build 32 (issue #24): Unix-style load averages (run-queue length),
-		// unitless, not percent. Published as DSM reports them. DSM appears
-		// to scale them by 100 (the devel baseline shows 13 with 0 % CPU on
-		// a 4-core NAS), but that is unconfirmed, so no division here until
-		// devel compares them with /proc/loadavg.
-		metric(out, "CPU|cpu_load_1m", cpu.get("1min_load").asDouble());
-		metric(out, "CPU|cpu_load_5m", cpu.get("5min_load").asDouble());
-		metric(out, "CPU|cpu_load_15m", cpu.get("15min_load").asDouble());
+		// unitless, not percent. Build 33 (issue #41): DSM scales them by
+		// 100, confirmed by the build 32 devel_9_1 proof (factory
+		// knowledge/context/investigations/
+		// 2026-10-16-synology-32-devel-9-1-proof.md, item 4: 473 / 280 / 138
+		// on a 4-core DS1520+ at 98 % CPU, a real 1-minute load of 4.73), so
+		// they are divided by 100 and skipped when DSM did not send them.
+		// See SynologyMetrics.loadAverage.
+		metricIfPresent(out, "CPU|cpu_load_1m",
+				SynologyMetrics.loadAverage(SJ, cpu, "1min_load"));
+		metricIfPresent(out, "CPU|cpu_load_5m",
+				SynologyMetrics.loadAverage(SJ, cpu, "5min_load"));
+		metricIfPresent(out, "CPU|cpu_load_15m",
+				SynologyMetrics.loadAverage(SJ, cpu, "15min_load"));
 		metric(out, "CPU|cpu_user_pct", cpu.get("user_load").asDouble());
 		metric(out, "CPU|cpu_system_pct", cpu.get("system_load").asDouble());
 		metric(out, "CPU|cpu_total_load",

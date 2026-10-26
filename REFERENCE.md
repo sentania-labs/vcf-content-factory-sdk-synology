@@ -62,6 +62,14 @@ Generated from `describe.xml` and `resources.properties` for build 1.0.0.16.
 | `cpu_system_pct` | CPU System % | metric | % | yes |
 | `cpu_total_load` | CPU Total Load | metric | % | yes |
 
+The three load averages are the Unix run-queue length (unitless, a 4-core
+NAS at full use reads about 4). DSM reports them multiplied by 100; since
+build 0.0.0.33 (issue #41) the adapter divides by 100 before publishing, so
+DSM's 473 is published as 4.73. A load average DSM does not send is
+skipped, not published as 0. Every build before 0.0.0.33, including
+v1.0.0.30 and earlier releases, published DSM's value as sent, so history
+before the upgrade is 100 times the real load.
+
 #### Memory
 
 | Key | Label | Type | Unit | Monitored |

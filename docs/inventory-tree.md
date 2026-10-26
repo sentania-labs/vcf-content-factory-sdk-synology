@@ -1,6 +1,6 @@
 # Inventory Tree — VCF Content Factory Synology DiskStation
 
-> Generated from `describe.xml` v0.0.0.32. Do not edit — regenerated on every build.
+> Generated from `describe.xml` v0.0.0.33. Do not edit — regenerated on every build.
 
 **Traversal Spec:** Synology DiskStation Storage Tree
 

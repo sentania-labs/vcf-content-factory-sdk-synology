@@ -14,7 +14,10 @@ import java.util.Map;
  * memory.total_real = 20328576 (KB) on a 20 GB DS1520+. Issue #34 fixtures
  * are the verbatim DSM 7.3.2 values in knowledge/context/api-maps/
  * synology-storage.md (volume and pool size, disk remain_life) and
- * synology-iscsi.md (the Utilization lun[] row). Run from the repo root
+ * synology-iscsi.md (the Utilization lun[] row). Issue #41 fixtures are the
+ * Utilization cpu object of synology-system.md and the DSM values recorded
+ * in the build 32 devel_9_1 proof (knowledge/context/investigations/
+ * 2026-10-16-synology-32-devel-9-1-proof.md, item 4). Run from the repo root
  * (ci/run_java_tests.sh).
  */
 public final class MetricsTest {
@@ -34,6 +37,7 @@ public final class MetricsTest {
 		capacityWithoutTotalPublishesNoUsage();
 		remainLifeReadsTheObjectValue();
 		lunLatencyUsesTheAvgFields();
+		loadAveragesAreDividedBy100();
 		System.out.println("MetricsTest: all assertions passed");
 	}
 
@@ -224,5 +228,37 @@ public final class MetricsTest {
 				obj("device", "ovs_bond0", "rx", 400, "tx", 400),
 				obj("device", "total", "rx", 400, "tx", 400)));
 		T.eq(400.0, t[0], "with a total row the total is used");
+	}
+
+	/**
+	 * Issue #41: DSM's load averages are x100. Recorded values: the API map's
+	 * Utilization cpu object, and the build 32 devel_9_1 proof, 473 / 280 /
+	 * 138 at 3:33 PM (98 % CPU, 4-core DS1520+) and 68 / 215 / 158 at
+	 * 3:38 PM.
+	 */
+	static void loadAveragesAreDividedBy100() {
+		Map<String, Object> apiMap = obj("user_load", 5, "system_load", 3,
+				"other_load", 0, "1min_load", 12, "5min_load", 8, "15min_load", 6);
+		T.eq(0.12, SynologyMetrics.loadAverage(MAPS, apiMap, "1min_load"), "API map 1 min");
+		T.eq(0.08, SynologyMetrics.loadAverage(MAPS, apiMap, "5min_load"), "API map 5 min");
+		T.eq(0.06, SynologyMetrics.loadAverage(MAPS, apiMap, "15min_load"), "API map 15 min");
+		Map<String, Object> busy = obj("1min_load", 473, "5min_load", 280,
+				"15min_load", 138);
+		T.eq(4.73, SynologyMetrics.loadAverage(MAPS, busy, "1min_load"),
+				"proof peak: 473 is a load of 4.73");
+		T.eq(2.8, SynologyMetrics.loadAverage(MAPS, busy, "5min_load"), "proof 5 min");
+		T.eq(1.38, SynologyMetrics.loadAverage(MAPS, busy, "15min_load"), "proof 15 min");
+		Map<String, Object> later = obj("1min_load", 68, "5min_load", 215,
+				"15min_load", 158);
+		T.eq(0.68, SynologyMetrics.loadAverage(MAPS, later, "1min_load"), "proof 3:38 PM 1 min");
+		T.eq(2.15, SynologyMetrics.loadAverage(MAPS, later, "5min_load"), "proof 3:38 PM 5 min");
+		T.eq(1.58, SynologyMetrics.loadAverage(MAPS, later, "15min_load"), "proof 3:38 PM 15 min");
+		T.eq(0.0, SynologyMetrics.loadAverage(MAPS, obj("1min_load", 0), "1min_load"),
+				"an idle NAS: a real 0");
+		T.eq(1.5, SynologyMetrics.loadAverage(MAPS, obj("1min_load", "150"), "1min_load"),
+				"a numeric string counts");
+		T.eq(null, SynologyMetrics.loadAverage(MAPS, obj("user_load", 5), "1min_load"),
+				"absent: not published, not 0");
+		T.eq(null, SynologyMetrics.loadAverage(MAPS, null, "1min_load"), "no cpu object");
 	}
 }

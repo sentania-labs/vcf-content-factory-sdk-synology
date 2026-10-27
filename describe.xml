@@ -42,10 +42,14 @@
 		</ResourceKind>
 
 		<!-- ================================================================ -->
-		<!-- SynologyWorld: top-down traversal entry point across instances    -->
+		<!-- SynologyWorld: top-down traversal entry, one per DiskStation     -->
 		<!-- ================================================================ -->
 		<ResourceKind key="SynologyWorld" nameKey="250" type="1">
 			<ResourceIdentifier key="world_id" nameKey="251" type="string" required="true" dispOrder="1"/>
+			<!-- Build 34 (issue #11): the DiskStation identity (DSM serial, or
+			     host:<host>:<port> when DSM sends none), part of uniqueness so two
+			     NASes never share an object. -->
+			<ResourceIdentifier key="diskstation_id" nameKey="310" type="string" required="true" dispOrder="2"/>
 		</ResourceKind>
 
 		<!-- ================================================================ -->
@@ -130,6 +134,10 @@
 		<!-- ================================================================ -->
 		<ResourceKind key="SynologyStoragePool" nameKey="100" type="1">
 			<ResourceIdentifier key="pool_id" nameKey="101" type="string" required="true" dispOrder="1"/>
+			<!-- Build 34 (issue #11): the DiskStation identity (DSM serial, or
+			     host:<host>:<port> when DSM sends none), part of uniqueness so two
+			     NASes never share an object. -->
+			<ResourceIdentifier key="diskstation_id" nameKey="310" type="string" required="true" dispOrder="2"/>
 
 			<ResourceGroup key="Capacity" nameKey="102" instanced="false">
 				<ResourceAttribute key="total_bytes" nameKey="103" dataType="float"
@@ -155,6 +163,10 @@
 		<!-- ================================================================ -->
 		<ResourceKind key="SynologyVolume" nameKey="120" type="1">
 			<ResourceIdentifier key="volume_id" nameKey="121" type="string" required="true" dispOrder="1"/>
+			<!-- Build 34 (issue #11): the DiskStation identity (DSM serial, or
+			     host:<host>:<port> when DSM sends none), part of uniqueness so two
+			     NASes never share an object. -->
+			<ResourceIdentifier key="diskstation_id" nameKey="310" type="string" required="true" dispOrder="2"/>
 
 			<ResourceGroup key="Capacity" nameKey="122" instanced="false">
 				<ResourceAttribute key="total_bytes" nameKey="123" dataType="float"
@@ -200,6 +212,10 @@
 		<!-- ================================================================ -->
 		<ResourceKind key="SynologyDisk" nameKey="140" type="1">
 			<ResourceIdentifier key="disk_id" nameKey="141" type="string" required="true" dispOrder="1"/>
+			<!-- Build 34 (issue #11): the DiskStation identity (DSM serial, or
+			     host:<host>:<port> when DSM sends none), part of uniqueness so two
+			     NASes never share an object. -->
+			<ResourceIdentifier key="diskstation_id" nameKey="310" type="string" required="true" dispOrder="2"/>
 
 			<ResourceGroup key="Health" nameKey="142" instanced="false">
 				<ResourceAttribute key="temperature" nameKey="143" dataType="float"
@@ -243,6 +259,10 @@
 		<!-- ================================================================ -->
 		<ResourceKind key="SynologyIscsiLun" nameKey="170" type="1">
 			<ResourceIdentifier key="lun_uuid" nameKey="171" type="string" required="true" dispOrder="1"/>
+			<!-- Build 34 (issue #11): the DiskStation identity (DSM serial, or
+			     host:<host>:<port> when DSM sends none), part of uniqueness so two
+			     NASes never share an object. -->
+			<ResourceIdentifier key="diskstation_id" nameKey="310" type="string" required="true" dispOrder="2"/>
 
 			<ResourceGroup key="IO" nameKey="172" instanced="false">
 				<ResourceAttribute key="read_iops" nameKey="173" dataType="float"
@@ -275,6 +295,10 @@
 		<!-- ================================================================ -->
 		<ResourceKind key="SynologyNfsExport" nameKey="190" type="1">
 			<ResourceIdentifier key="share_name" nameKey="191" type="string" required="true" dispOrder="1"/>
+			<!-- Build 34 (issue #11): the DiskStation identity (DSM serial, or
+			     host:<host>:<port> when DSM sends none), part of uniqueness so two
+			     NASes never share an object. -->
+			<ResourceIdentifier key="diskstation_id" nameKey="310" type="string" required="true" dispOrder="2"/>
 
 			<ResourceGroup key="Capacity" nameKey="192" instanced="false">
 				<ResourceAttribute key="size_used_mib" nameKey="193" dataType="float"
@@ -310,6 +334,10 @@
 		<!-- ================================================================ -->
 		<ResourceKind key="SynologyUps" nameKey="210" type="1">
 			<ResourceIdentifier key="ups_model" nameKey="211" type="string" required="true" dispOrder="1"/>
+			<!-- Build 34 (issue #11): the DiskStation identity (DSM serial, or
+			     host:<host>:<port> when DSM sends none), part of uniqueness so two
+			     NASes never share an object. -->
+			<ResourceIdentifier key="diskstation_id" nameKey="310" type="string" required="true" dispOrder="2"/>
 
 			<ResourceGroup key="Battery" nameKey="212" instanced="false">
 				<ResourceAttribute key="charge_pct" nameKey="213" dataType="float"
@@ -330,6 +358,10 @@
 		<!-- ================================================================ -->
 		<ResourceKind key="SynologySsdCache" nameKey="220" type="1">
 			<ResourceIdentifier key="cache_id" nameKey="221" type="string" required="true" dispOrder="1"/>
+			<!-- Build 34 (issue #11): the DiskStation identity (DSM serial, or
+			     host:<host>:<port> when DSM sends none), part of uniqueness so two
+			     NASes never share an object. -->
+			<ResourceIdentifier key="diskstation_id" nameKey="310" type="string" required="true" dispOrder="2"/>
 
 			<ResourceGroup key="HitRate" nameKey="222" instanced="false">
 				<ResourceAttribute key="read_hit_rate" nameKey="223" dataType="float"

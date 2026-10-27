@@ -65,6 +65,7 @@ public final class TopologyTest {
 		missingFieldsCostOnlyTheirOwnEdges();
 		unreadListsKeepVolumeEdges();
 		failedProbeFreezesOnlyItsVolume();
+		twoNasesShareNoObject();
 		System.out.println("TopologyTest: all assertions passed");
 	}
 
@@ -85,19 +86,28 @@ public final class TopologyTest {
 		return new ArrayList<>(Arrays.asList(items));
 	}
 
+	/** Build 34 (issue #11): the fixture's DiskStation identity, its serial. */
+	static final String SERIAL = "20B0RYRXRF3KF";
+
+	/**
+	 * An object of the fixture NAS: every kind but the DiskStation carries
+	 * the DiskStation identity (build 34, issue #11).
+	 */
 	static SynologyTopology.Obj o(String kind, String name, String idKey, String id) {
-		return new SynologyTopology.Obj(kind, name, idKey, id);
+		return new SynologyTopology.Obj(kind, name, idKey, id,
+				DeviceIdentity.DISKSTATION_KIND.equals(kind) ? null : SERIAL);
 	}
 
 	static String edge(SynologyTopology.Obj p, SynologyTopology.Obj c) {
-		return p.kind + ":" + p.id + "(" + p.name + ") -> " + c.kind + ":" + c.id
-				+ "(" + c.name + ")";
+		return p.kind + ":" + p.id + "@" + p.device + "(" + p.name + ") -> "
+				+ c.kind + ":" + c.id + "@" + c.device + "(" + c.name + ")";
 	}
 
 	/** A DS1520+ with one pool, one volume, a LUN, an NFS export, an SSD cache and a UPS. */
 	static SynologyTopology.Input<Object> fullFixture() {
 		SynologyTopology.Input<Object> in = new SynologyTopology.Input<>();
-		in.dsmInfo = response(obj("serial", "20B0RYRXRF3KF", "model", "DS1520+"));
+		in.dsmInfo = response(obj("serial", SERIAL, "model", "DS1520+"));
+		in.device = new DeviceIdentity.Id(SERIAL, SERIAL, true);
 		in.storage = response(obj(
 				"disks", list(
 						obj("id", "sata1", "name", "Drive 1"),
@@ -130,8 +140,8 @@ public final class TopologyTest {
 
 	/** Must not regress: the edge list build 30's buildRelationships emits. */
 	static void fullFixtureEmitsBuild30Edges() {
-		SynologyTopology.Obj world = o("SynologyWorld", "Synology World", "world_id", "synology_world");
-		SynologyTopology.Obj ds = o("SynologyDiskstation", "DS1520+ 20B0RYRXRF3KF", "serial", "20B0RYRXRF3KF");
+		SynologyTopology.Obj world = o("SynologyWorld", "Synology World (" + SERIAL + ")", "world_id", "synology_world");
+		SynologyTopology.Obj ds = o("SynologyDiskstation", "DS1520+ " + SERIAL, "serial", SERIAL);
 		SynologyTopology.Obj pool = o("SynologyStoragePool", "Storage Pool 1", "pool_id", "reuse_1");
 		SynologyTopology.Obj vol = o("SynologyVolume", "Volume 1", "volume_id", "/volume1");
 		SynologyTopology.Obj cache = o("SynologySsdCache", "SSD Cache (Volume 1)", "cache_id", "alloc_cache_1_1");
@@ -176,12 +186,12 @@ public final class TopologyTest {
 		List<String> infos = new ArrayList<>();
 		List<String> edges = run(in, warns, infos);
 
-		SynologyTopology.Obj ds = o("SynologyDiskstation", "DS1520+ 20B0RYRXRF3KF", "serial", "20B0RYRXRF3KF");
+		SynologyTopology.Obj ds = o("SynologyDiskstation", "DS1520+ " + SERIAL, "serial", SERIAL);
 		SynologyTopology.Obj pool1 = o("SynologyStoragePool", "Storage Pool 1", "pool_id", "reuse_1");
 		SynologyTopology.Obj pool2 = o("SynologyStoragePool", "Storage Pool 2", "pool_id", "reuse_2");
 		SynologyTopology.Obj vol = o("SynologyVolume", "Volume 1", "volume_id", "/volume1");
 		for (String e : Arrays.asList(
-				edge(o("SynologyWorld", "Synology World", "world_id", "synology_world"), ds),
+				edge(o("SynologyWorld", "Synology World (" + SERIAL + ")", "world_id", "synology_world"), ds),
 				edge(ds, pool1),
 				edge(pool1, vol),
 				edge(ds, pool2),
@@ -195,7 +205,8 @@ public final class TopologyTest {
 			T.check(!e.contains("c3d4"), "the LUN without location has no edge: " + e);
 			T.check(!e.contains("Storage Pool 3"), "the pool without id has no edge: " + e);
 			T.check(!e.contains("Volume 9"), "the volume without identity has no edge: " + e);
-			T.check(!e.startsWith("SynologyStoragePool:reuse_2(Storage Pool 2) -> SynologyVolume"),
+			T.check(!e.startsWith("SynologyStoragePool:reuse_2@" + SERIAL
+					+ "(Storage Pool 2) -> SynologyVolume"),
 					"the pool without pool_path has no volume edge: " + e);
 		}
 		T.eq(0, warns.size(), "missing fields are expected shapes, not WARNs");
@@ -204,6 +215,47 @@ public final class TopologyTest {
 		T.check(info.contains("no pool_path") && info.contains("no location")
 				&& info.contains("no id") && info.contains("no volume_id or vol_path"),
 				"the INFO names each missing field: " + info);
+	}
+
+	/**
+	 * Build 34 (issue #11): two DiskStations with the same DSM-local ids
+	 * (reuse_1, /volume1, sata1, the UPS model, ...) emit no object in
+	 * common, and every object but the DiskStation carries its NAS's
+	 * identity; the fallback identity names the World and DiskStation by
+	 * the endpoint.
+	 */
+	static void twoNasesShareNoObject() {
+		SynologyTopology.Input<Object> a = fullFixture();
+		SynologyTopology.Input<Object> b = fullFixture();
+		b.dsmInfo = response(obj("model", "DS1520+"));
+		b.device = new DeviceIdentity.Id("host:nas2.lab:5001", "nas2.lab:5001", false);
+		java.util.Set<SynologyTopology.Obj> objsA = new HashSet<>();
+		java.util.Set<SynologyTopology.Obj> objsB = new HashSet<>();
+		SynologyTopology.build(MAPS, a, (p, c) -> { objsA.add(p); objsA.add(c); },
+				x -> {}, x -> {});
+		SynologyTopology.build(MAPS, b, (p, c) -> { objsB.add(p); objsB.add(c); },
+				x -> {}, x -> {});
+		T.eq(objsA.size(), objsB.size(), "same tree shape");
+		for (SynologyTopology.Obj x : objsA) {
+			T.check(!objsB.contains(x), "no shared object: " + x);
+			if (x.kind.equals(DeviceIdentity.DISKSTATION_KIND)) {
+				T.eq(null, x.device, "the DiskStation carries no second identifier");
+				T.eq(SERIAL, x.id, "the DiskStation's serial identifier is the identity");
+			} else {
+				T.eq(SERIAL, x.device, "carries the identity: " + x);
+			}
+		}
+		for (SynologyTopology.Obj x : objsB) {
+			if (x.kind.equals(DeviceIdentity.DISKSTATION_KIND)) {
+				T.eq("host:nas2.lab:5001", x.id, "fallback DiskStation identity");
+				T.eq("DS1520+ nas2.lab:5001", x.name, "fallback DiskStation name");
+			} else {
+				T.eq("host:nas2.lab:5001", x.device, "carries the fallback: " + x);
+			}
+			if (x.kind.equals("SynologyWorld")) {
+				T.eq("Synology World (nas2.lab:5001)", x.name, "one World per NAS");
+			}
+		}
 	}
 
 	/** Issue #14 interplay: an unread LUN or share list keeps Volume edges. */
@@ -250,7 +302,7 @@ public final class TopologyTest {
 
 		List<String> edges = run(in, new ArrayList<>(), new ArrayList<>());
 		for (String e : edges) {
-			T.check(!e.startsWith("SynologyVolume:/volume1("),
+			T.check(!e.startsWith("SynologyVolume:/volume1@"),
 					"Volume 1 is not a parent, its edges are kept: " + e);
 		}
 		SynologyTopology.Obj vol2 = o("SynologyVolume", "Volume 2", "volume_id", "/volume2");

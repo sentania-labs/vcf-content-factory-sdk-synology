@@ -33,7 +33,7 @@ discovered or collected for that cycle:
 
 | Required endpoint | Carries |
 |---|---|
-| `SYNO.DSM.Info` | DiskStation model, serial, temperature, uptime |
+| `SYNO.DSM.Info` | DiskStation model, serial (the identity of every object, build 34), temperature, uptime |
 | `SYNO.Core.System` (info) | hostname, firmware |
 | `SYNO.Core.System.Utilization` | CPU, memory, network, disk / volume / LUN IO |
 | `SYNO.Storage.CGI.Storage` (load_info) | storage pools, volumes, disks, SSD caches |
@@ -243,7 +243,38 @@ path's HTTPS requirement.
 6. The adapter discovers the storage tree and begins collecting on the
    next cycle (default 5 minutes).
 
+## Upgrading
+
+Upgrading to build 34 re-creates the pool, volume, disk, SSD cache, LUN,
+NFS export, UPS and World objects once (they are now identified by the
+DiskStation's serial number), and history on the old objects does not carry
+over. See [Upgrading](../README.md#upgrading) for what changes and how to
+delete the old objects.
+
 ## Troubleshooting
+
+- **The adapter log has `DiskStation identity: SYNO.DSM.Info returned no
+  serial number`** (build 34+). The account cannot read the serial (or the
+  DSM, a Virtual DSM for example, has none), so the objects are identified
+  by the account's host and port: editing either re-creates them. Use an
+  administrators-group account to identify the NAS by its serial; the
+  objects then move to the serial once.
+- **Every Synology object is ERROR with `SYNO.DSM.Info returned no serial
+  this cycle but returned ... earlier`, or with `SYNO.DSM.Info returned no
+  serial, and this adapter instance already has the DiskStation with
+  serial ...`** (build 34+). DSM stopped sending the serial it sent before
+  (for example, the account lost administrator rights). The cycle fails
+  rather than moving the objects to the host-based identity, also after a
+  collector restart, an upgrade or an account edit, because the adapter
+  checks for a serial-keyed DiskStation object on this instance. Restore
+  the account's rights. To accept the host-based identity instead (its
+  objects are new), delete the serial-keyed DiskStation object, then save
+  the adapter instance.
+- **Old Synology objects still show Data Receiving, with values that no
+  longer change, after an upgrade** (build 34+). They carry the identity
+  from before build 34 and get no new data, but VCF Operations keeps their
+  last status and values until they are deleted; delete them (see
+  Upgrading).
 
 - **Test Connection fails on TLS**: the NAS certificate is untrusted and
   was not accepted (see TLS above). Click **Validate Connection** again

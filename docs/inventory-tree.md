@@ -1,6 +1,6 @@
-# Inventory Tree — VCF Content Factory Synology DiskStation
+# Inventory Tree: VCF Content Factory Synology DiskStation
 
-> Generated from `describe.xml` v0.0.0.33. Do not edit — regenerated on every build.
+> Generated from `describe.xml` v0.0.0.34. Do not edit: regenerated on every build.
 
 **Traversal Spec:** Synology DiskStation Storage Tree
 
@@ -24,19 +24,19 @@
 
 | Kind | Display Label | Identifying Keys | Parent(s) |
 |------|--------------|-----------------|-----------|
-| `SynologyWorld` | Synology World | `world_id` * | Synology DiskStation |
+| `SynologyWorld` | Synology World | `world_id` *, `diskstation_id` * | Synology DiskStation |
 | `SynologyDiskstation` | Synology Diskstation | `serial` * | Synology World |
-| `SynologyStoragePool` | Synology Storage Pool | `pool_id` * | Synology Diskstation |
-| `SynologyVolume` | Synology Volume | `volume_id` * | Synology Storage Pool |
-| `SynologyDisk` | Synology Disk | `disk_id` * | Synology SSD Cache, Synology Storage Pool |
-| `SynologyIscsiLun` | Synology iSCSI LUN | `lun_uuid` * | Synology Volume |
-| `SynologyNfsExport` | Synology NFS Export | `share_name` * | Synology Volume |
-| `SynologyUps` | Synology UPS | `ups_model` * | Synology Diskstation |
-| `SynologySsdCache` | Synology SSD Cache | `cache_id` * | Synology Volume |
+| `SynologyStoragePool` | Synology Storage Pool | `pool_id` *, `diskstation_id` * | Synology Diskstation |
+| `SynologyVolume` | Synology Volume | `volume_id` *, `diskstation_id` * | Synology Storage Pool |
+| `SynologyDisk` | Synology Disk | `disk_id` *, `diskstation_id` * | Synology SSD Cache, Synology Storage Pool |
+| `SynologyIscsiLun` | Synology iSCSI LUN | `lun_uuid` *, `diskstation_id` * | Synology Volume |
+| `SynologyNfsExport` | Synology NFS Export | `share_name` *, `diskstation_id` * | Synology Volume |
+| `SynologyUps` | Synology UPS | `ups_model` *, `diskstation_id` * | Synology Diskstation |
+| `SynologySsdCache` | Synology SSD Cache | `cache_id` *, `diskstation_id` * | Synology Volume |
 
 ## Cross-MP Relationships
 
-These edges are created at collection time via the Suite API and never appear in `describe.xml` — they are declared explicitly in `adapter.yaml` (`cross_mp_edges`) so this generated docset doesn't silently omit them. *Italic* endpoints belong to a foreign management pack; `code` endpoints are owned by this adapter.
+These edges are created at collection time via the Suite API and never appear in `describe.xml`. They are declared explicitly in `adapter.yaml` (`cross_mp_edges`) so this generated docset doesn't silently omit them. *Italic* endpoints belong to a foreign management pack; `code` endpoints are owned by this adapter.
 
 | Parent | Child | Description |
 |--------|-------|-------------|

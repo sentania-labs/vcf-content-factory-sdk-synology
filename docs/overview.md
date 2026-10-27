@@ -21,7 +21,7 @@ metric list):
 
 | Kind | Key | What it represents |
 |------|-----|--------------------|
-| Synology World | `SynologyWorld` | Aggregation root (singleton per instance). |
+| Synology World | `SynologyWorld` | Aggregation root, one per DiskStation (build 34). |
 | Synology Diskstation | `SynologyDiskstation` | The NAS appliance — system, CPU, memory, network, temperature, NFS service. |
 | Synology Storage Pool | `SynologyStoragePool` | RAID pool capacity and configuration. |
 | Synology Volume | `SynologyVolume` | Volume capacity, IO, and SSD-cache hit rates. |
@@ -93,6 +93,15 @@ normally — collection is never failed over the optional cross-link.
 > persist time).
 
 ## Notable Behaviors
+
+- **Each NAS has its own objects (build 34, issue #11).** Every object is
+  identified by its DiskStation: the DSM serial number, or the account's
+  `host:<host>:<port>` when DSM sends none (announced by one WARN). Before
+  build 34 objects below the DiskStation were keyed by DSM-local ids
+  (`reuse_1`, `/volume1`, `sata1`) that most DiskStations share, so two
+  NASes wrote into the same objects. Upgrading re-creates them once; see
+  the README section Upgrading and
+  [REFERENCE.md](../REFERENCE.md#diskstation-identity).
 
 - **Unreadable is not a sentinel.** A "success-shaped but empty" DSM payload
   (e.g. `DSM.Info` with no model, or `Core.System.Utilization` with no cpu)

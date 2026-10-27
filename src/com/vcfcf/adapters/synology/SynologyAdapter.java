@@ -172,15 +172,29 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		final SnapshotReads reads;
 		/** Build 32 (issue #20): this configuration's remembered NFS probes. */
 		final NfsProbes.Cached<SimpleJson> nfsProbes;
+		/**
+		 * Build 34 (issue #11): this configuration's DiskStation identity
+		 * (the DSM serial, or the configured endpoint), see
+		 * {@link DeviceIdentity}.
+		 */
+		final DeviceIdentity identity;
+		/**
+		 * Build 34 (issue #11): objects already reported as carrying another
+		 * (or no) DiskStation identity, so each is logged once per
+		 * configuration, not once per cycle.
+		 */
+		final java.util.Set<String> retiredLogged =
+				java.util.concurrent.ConcurrentHashMap.newKeySet();
 
 		Configured(SynologyApiClient api, Logger snapshotLog,
 				SnapshotCache<Snapshot> snapshots, SnapshotReads reads,
-				NfsProbes.Cached<SimpleJson> nfsProbes) {
+				NfsProbes.Cached<SimpleJson> nfsProbes, DeviceIdentity identity) {
 			this.api = api;
 			this.snapshotLog = snapshotLog;
 			this.snapshots = snapshots;
 			this.reads = reads;
 			this.nfsProbes = nfsProbes;
+			this.identity = identity;
 		}
 	}
 
@@ -249,7 +263,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 						snapshotLog::debug),
 				new SnapshotReads(),
 				new NfsProbes.Cached<>(System::currentTimeMillis,
-						NFS_RULES_REFRESH_MS, NFS_PROBE_WARN_EVERY_MS));
+						NFS_RULES_REFRESH_MS, NFS_PROBE_WARN_EVERY_MS),
+				// Build 34 (issue #11): the fallback identity is this
+				// configuration's endpoint, so an edit starts afresh.
+				new DeviceIdentity(cfg.host, cfg.port));
 
 		// Optional Datastore cross-link transport (build 16; explicit-creds
 		// branch build 21). Two paths, selected by config:
@@ -487,8 +504,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	// onDiscover() for adapter3-path collectors, so a fresh instance would
 	// heartbeat GREEN yet sit at zero resources forever (build-framework #18).
 	// Opting in drives enumeration from the top of every collect cycle; the
-	// platform de-duplicates by identifying identifier, so the 25 existing
-	// devel resources do NOT duplicate (rcOf order/values unchanged from b16).
+	// platform de-duplicates by identifying identifier. Build 34 (issue #11)
+	// added the DiskStation identity to every identifier set below the
+	// DiskStation, so those objects are new once on upgrade (README,
+	// Upgrading); from then on they de-duplicate as before.
 	// The framework default getDiscoverer() also calls enumerateResources, so
 	// onDiscover() stays wired for platforms that do call it — no drift.
 	// -----------------------------------------------------------------------
@@ -549,35 +568,38 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	protected void enumerateResources(ResourceSink sink)
 			throws InterruptedException, Exception {
 		Snapshot s = currentSnapshot();
+		// Build 34 (issue #11): every object below the DiskStation, and the
+		// World, carries the DiskStation identity as a second identifying
+		// identifier; the DiskStation's serial identifier is that identity.
+		final String dev = s.device.value;
 
-		// World singleton
-		sink.accept(rcOf("SynologyWorld", "Synology World",
-				"world_id", "synology_world"));
+		// World: one per DiskStation (build 34; it was one shared object).
+		sink.accept(rcOf("SynologyWorld", s.device.worldName(),
+				"world_id", "synology_world", dev));
 
 		// Diskstation singleton
-		String serial = s.dsmInfo.data().get("serial").asString("unknown");
 		String model = s.dsmInfo.data().get("model").asString("");
-		String dsName = model.isEmpty() ? serial : model + " " + serial;
-		sink.accept(rcOf("SynologyDiskstation", dsName, "serial", serial));
+		sink.accept(rcOf(DeviceIdentity.DISKSTATION_KIND,
+				s.device.diskstationName(model), "serial", dev, null));
 
 		SimpleJson storage = s.storage;
 		int pools = 0, volumes = 0, disks = 0, caches = 0, luns = 0, exports = 0;
 
 		for (SimpleJson pool : storage.data().get("storagePools").asList()) {
 			sink.accept(rcOf("SynologyStoragePool", poolDisplayName(pool),
-					"pool_id", pool.get("id").asString()));
+					"pool_id", pool.get("id").asString(), dev));
 			pools++;
 		}
 		for (SimpleJson vol : storage.data().get("volumes").asList()) {
 			String volPath = vol.get("vol_path").asString();
 			sink.accept(rcOf("SynologyVolume", volumeDisplayName(vol),
-					"volume_id", vol.get("volume_id").asString(volPath)));
+					"volume_id", vol.get("volume_id").asString(volPath), dev));
 			volumes++;
 		}
 		for (SimpleJson disk : storage.data().get("disks").asList()) {
 			String diskId = disk.get("id").asString();
 			sink.accept(rcOf("SynologyDisk", disk.get("name").asString(diskId),
-					"disk_id", diskId));
+					"disk_id", diskId, dev));
 			disks++;
 		}
 		SimpleJson ssdCaches = storage.data().get("ssdCaches");
@@ -585,7 +607,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			for (SimpleJson cache : ssdCaches.asList()) {
 				sink.accept(rcOf("SynologySsdCache",
 						cacheDisplayName(cache, storage),
-						"cache_id", cache.get("id").asString()));
+						"cache_id", cache.get("id").asString(), dev));
 				caches++;
 			}
 		}
@@ -593,7 +615,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		for (SimpleJson lun : s.lunList.data().get("luns").asList()) {
 			String uuid = lun.get("uuid").asString();
 			sink.accept(rcOf("SynologyIscsiLun",
-					lun.get("name").asString(uuid), "lun_uuid", uuid));
+					lun.get("name").asString(uuid), "lun_uuid", uuid, dev));
 			luns++;
 		}
 
@@ -603,7 +625,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		for (SimpleJson share : s.shares.data().get("shares").asList()) {
 			String name = share.get("name").asString();
 			if (s.nfsRulesByShare.containsKey(name)) {
-				sink.accept(rcOf("SynologyNfsExport", name, "share_name", name));
+				sink.accept(rcOf("SynologyNfsExport", name, "share_name", name,
+						dev));
 				exports++;
 			}
 		}
@@ -611,19 +634,39 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		// UPS (optional): present in the snapshot only when usb_ups_connect=true.
 		if (s.ups != null) {
 			String upsModel = s.ups.data().get("model").asString("UPS");
-			sink.accept(rcOf("SynologyUps", upsModel, "ups_model", upsModel));
+			sink.accept(rcOf("SynologyUps", upsModel, "ups_model", upsModel,
+					dev));
 		}
 
-		logInfo("Synology enumerate: 1 world, 1 diskstation, " + pools
+		logInfo("Synology enumerate (" + DeviceIdentity.ID_KEY + "=" + dev
+				+ "): 1 world, 1 diskstation, " + pools
 				+ " pools, " + volumes + " volumes, " + disks + " disks, "
 				+ caches + " ssd-caches, " + luns + " luns, " + exports
 				+ " nfs-exports");
 	}
 
-	private ResourceConfig rcOf(String kind, String name, String idKey, String idValue) {
+	private ResourceConfig rcOf(String kind, String name, String idKey,
+			String idValue, String device) {
+		return new ResourceConfig(resourceKey(kind, name, idKey, idValue, device));
+	}
+
+	/**
+	 * Build 34 (issue #11): the key of one of this adapter's objects, the
+	 * one place enumeration, relationships and the Datastore cross-link
+	 * build it, so they cannot drift. Its own identifier, plus the
+	 * DiskStation identity as {@link DeviceIdentity#ID_KEY} unless
+	 * {@code device} is null (the DiskStation, whose serial identifier is
+	 * that identity). Both are part of the object's uniqueness.
+	 */
+	static ResourceKey resourceKey(String kind, String name, String idKey,
+			String idValue, String device) {
 		ResourceKey key = new ResourceKey(name, kind, ADAPTER_KIND);
 		key.addIdentifier(new ResourceIdentifierConfig(idKey, idValue, true));
-		return new ResourceConfig(key);
+		if (device != null) {
+			key.addIdentifier(new ResourceIdentifierConfig(DeviceIdentity.ID_KEY,
+					device, true));
+		}
+		return key;
 	}
 
 	// -----------------------------------------------------------------------
@@ -664,7 +707,16 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					return null;
 				}
 				try {
-					return buildRelationships(currentSnapshot());
+					Snapshot snap = currentSnapshot();
+					// Build 34 (issue #11): only this DiskStation's World
+					// anchors the tree; a World from before build 34 (or
+					// from an identity this configuration no longer has)
+					// emits nothing.
+					if (!DeviceIdentity.belongs(getIdentifier(rc,
+							DeviceIdentity.ID_KEY), snap.device)) {
+						return null;
+					}
+					return buildRelationships(snap);
 				} catch (Exception e) {
 					logWarn("Relationship build failed: " + e.getMessage());
 					return null;
@@ -716,7 +768,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 		// Review NIT-3: the login runs inside the read plan, after its own
 		// abort check (SnapshotReads.read), not before the first checkpoint.
-		return c.snapshots.get(() -> Snapshot.build(c.api, c.reads, c.nfsProbes, this),
+		return c.snapshots.get(() -> Snapshot.build(c.api, c.reads, c.nfsProbes,
+				c.identity, this),
 				this::logWarn);
 	}
 
@@ -745,6 +798,17 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			List<MetricData> out) throws IOException {
 		String kind = rc.getResourceKind();
 		if (kind == null) return;
+		// Build 34 (issue #11): an object that does not carry this cycle's
+		// DiskStation identity (one created before build 34, whose ids were
+		// shared by every NAS, or one from a fallback identity this
+		// configuration has left) gets no data, so it can never show another
+		// NAS's values; it is left for the administrator to delete (README,
+		// Upgrading). One INFO line per object per configuration.
+		String carried = getIdentifier(rc, DeviceIdentity.identifierKeyFor(kind));
+		if (!DeviceIdentity.belongs(carried, snap.device)) {
+			logRetired(rc, kind, carried, snap.device);
+			return;
+		}
 		// Build 31 (issue #14): a LUN or NFS export whose list was not read
 		// this cycle is ERROR, not "collected nothing"; see
 		// SnapshotIsolation.requireListRead.
@@ -780,6 +844,54 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			default:
 				logWarn("collect: unknown resource kind " + kind);
 		}
+	}
+
+	/**
+	 * Build 34 (review B1): the {@code serial} identifier of every DiskStation
+	 * object this adapter instance already has, from the platform's own list
+	 * of the instance's objects ({@code AdapterBase.getAllMonitoringResources},
+	 * the set each collect cycle is given). It survives a collector restart,
+	 * a pak upgrade and an account edit, which the in-memory latch in
+	 * {@link DeviceIdentity} does not. Read only when DSM sent no serial. A
+	 * list the platform cannot give fails the snapshot build: not knowing
+	 * whether a serial-keyed DiskStation exists is no licence to re-key.
+	 */
+	List<String> existingDiskstationSerials() {
+		java.util.Collection<ResourceConfig> all;
+		try {
+			all = getAllMonitoringResources();
+		} catch (RuntimeException e) {
+			throw new IllegalStateException("DiskStation identity: this "
+					+ "instance's existing objects could not be read (" + e
+					+ "); the cycle fails rather than choosing the fallback "
+					+ "identity blind", e);
+		}
+		List<String> out = new ArrayList<>();
+		if (all == null) return out;
+		for (ResourceConfig rc : all) {
+			if (DeviceIdentity.DISKSTATION_KIND.equals(rc.getResourceKind())) {
+				String v = getIdentifier(rc, "serial");
+				if (v != null) out.add(v);
+			}
+		}
+		return out;
+	}
+
+	/**
+	 * Build 34 (issue #11): one INFO line per object, per configuration, for
+	 * an object {@link #dispatchCollect} publishes nothing for.
+	 */
+	private void logRetired(ResourceConfig rc, String kind, String carried,
+			DeviceIdentity.Id current) {
+		Configured c = this.configured;
+		String name = rc.getResourceName();
+		String what = kind + " '" + name + "' ("
+				+ DeviceIdentity.identifierKeyFor(kind) + "=" + carried + ")";
+		if (c != null && !c.retiredLogged.add(what)) return;
+		logInfo("collect: " + what + " does not carry this DiskStation's "
+				+ "identity " + current + " (an object from before build 34, "
+				+ "or from an earlier identity); no data is published for it. "
+				+ "Delete it: see the README section Upgrading.");
 	}
 
 	// -----------------------------------------------------------------------
@@ -1222,17 +1334,24 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		// SynologyTopology (SDK-free, null-safe joins, one try block per
 		// pool, LUN, export and SSD cache), so one object with a missing
 		// field costs its own edges instead of every relationship of the
-		// cycle. Same edges, order, names and identifiers as build 30.
+		// cycle. Same edges and order as build 30; from build 34 (issue
+		// #11) every key also carries the DiskStation identity, and the
+		// World's name and identifier are per DiskStation.
 		SynologyTopology.Input<SimpleJson> in = new SynologyTopology.Input<>();
 		in.dsmInfo = s.dsmInfo;
+		in.device = s.device;
 		in.storage = s.storage;
 		in.lunList = s.lunList;
 		in.shares = s.shares;
 		in.ups = s.ups;
 		in.nfsExports = s.nfsRulesByShare.keySet();
 		in.volumeChildren = volumeChildren;
+		// Build 34 (issue #11): one key instance per object, so a parent's
+		// edges collect under one entry (the builder's own key cache is by
+		// kind and id value only, without the DiskStation identity).
+		final Map<SynologyTopology.Obj, ResourceKey> keys = new HashMap<>();
 		SynologyTopology.build(SJ, in,
-				(parent, child) -> rb.parent(key(rb, parent), key(rb, child)),
+				(parent, child) -> rb.parent(key(keys, parent), key(keys, child)),
 				this::logWarn, this::logInfo);
 
 		// --- Optional Datastore cross-link (build 16, v1 parity) ---
@@ -1276,8 +1395,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				String path = SynologyStitcher.lunDataStorePath(uuid);
 				List<ResourceKey> matches = st.matchByPath(path);
 				if (matches.isEmpty()) continue;
-				ResourceKey lunKey = rb.resource("SynologyIscsiLun",
-						lun.get("name").asString(uuid), "lun_uuid", uuid);
+				// Build 34 (issue #11): the LUN's full identity, with the
+				// DiskStation's.
+				ResourceKey lunKey = resourceKey("SynologyIscsiLun",
+						lun.get("name").asString(uuid), "lun_uuid", uuid,
+						s.device.value);
 				// Standardized direction (1.0.0.18): the VMWARE Datastore is the
 				// PARENT of its backing LUN — the original design intent and the
 				// same shape NFS already used. parentForeign emits
@@ -1311,8 +1433,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					List<ResourceKey> matches = st.matchByPath(path);
 					if (matches.isEmpty()) continue;
 					if (exportKey == null) {
-						exportKey = rb.resource("SynologyNfsExport", name,
-								"share_name", name);
+						exportKey = resourceKey("SynologyNfsExport", name,
+								"share_name", name, s.device.value);
 					}
 					// One path can back N datastores (one per vCenter view) — bind
 					// every copy with the Datastore as parent (DEF-003-safe).
@@ -1353,9 +1475,15 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		return SynologyTopology.cacheName(SJ, cache, storage);
 	}
 
-	/** Build 31 (issue #19): the relationship key of a topology object. */
-	private static ResourceKey key(RelationshipBuilder rb, SynologyTopology.Obj o) {
-		return rb.resource(o.kind, o.name, o.idKey, o.id);
+	/**
+	 * Build 31 (issue #19): the relationship key of a topology object.
+	 * Build 34 (issue #11): with the DiskStation identity, one instance per
+	 * object per build from {@code keys}.
+	 */
+	private static ResourceKey key(Map<SynologyTopology.Obj, ResourceKey> keys,
+			SynologyTopology.Obj o) {
+		return keys.computeIfAbsent(o,
+				x -> resourceKey(x.kind, x.name, x.idKey, x.id, x.device));
 	}
 
 	/**
@@ -1439,6 +1567,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson connections;
 		SimpleJson shares;
 		SimpleJson ups; // nullable: UPS optional
+		/**
+		 * Build 34 (issue #11): this cycle's DiskStation identity, resolved
+		 * from {@code SYNO.DSM.Info} serial by the configuration's
+		 * {@link DeviceIdentity}. Never null in a built snapshot.
+		 */
+		DeviceIdentity.Id device;
 
 		/**
 		 * Build 31 (issue #14): optional endpoints not read this cycle,
@@ -1490,7 +1624,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		boolean nfsDisabled;
 
 		static Snapshot build(SynologyApiClient api, SnapshotReads reads,
-				NfsProbes.Cached<SimpleJson> nfsProbes,
+				NfsProbes.Cached<SimpleJson> nfsProbes, DeviceIdentity identity,
 				SynologyAdapter adapter) throws Exception {
 			Snapshot s = new Snapshot();
 			// Build 31: SnapshotReads logs in if needed and runs the abort
@@ -1532,6 +1666,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 						+ "payload with no 'cpu' field — treating as unreadable (no "
 						+ "sentinel metrics published)");
 			}
+			// Build 34 (issue #11): the identity every object carries. Fails
+			// the build when a serial read earlier is missing now, or (review
+			// B1) when this instance already has a DiskStation keyed by a real
+			// serial, so the objects never move to the fallback identity and
+			// back, not even after a restart forgets the in-memory latch.
+			s.device = identity.resolve(
+					s.dsmInfo.data().get("serial").asString(),
+					adapter::existingDiskstationSerials, adapter::logWarn);
 
 			adapter.checkpoint("Core.ExternalDevice.UPS");
 			try {

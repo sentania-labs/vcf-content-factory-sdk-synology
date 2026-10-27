@@ -28,6 +28,10 @@ import java.util.function.Consumer;
  * line per build lists them), and each pool, LUN, export and SSD cache is
  * joined in its own try block, so one odd object costs its own edges, not
  * the tree.
+ *
+ * <p>Build 34 (issue #11): every object carries the DiskStation identity
+ * ({@link Input#device}, see {@link DeviceIdentity}); the edge order is
+ * unchanged, the World is one per DiskStation and named after it.
  */
 final class SynologyTopology {
 
@@ -49,18 +53,25 @@ final class SynologyTopology {
 		boolean isNull(J node);
 	}
 
-	/** One object: resource kind, display name, identifier key and value. */
+	/**
+	 * One object: resource kind, display name, identifier key and value, and
+	 * (build 34, issue #11) the DiskStation identity it carries as
+	 * {@link DeviceIdentity#ID_KEY}, {@code null} on the DiskStation itself
+	 * (whose {@code serial} identifier is that identity).
+	 */
 	static final class Obj {
 		final String kind;
 		final String name;
 		final String idKey;
 		final String id;
+		final String device;
 
-		Obj(String kind, String name, String idKey, String id) {
+		Obj(String kind, String name, String idKey, String id, String device) {
 			this.kind = kind;
 			this.name = name;
 			this.idKey = idKey;
 			this.id = id;
+			this.device = device;
 		}
 
 		@Override
@@ -68,17 +79,20 @@ final class SynologyTopology {
 			if (!(o instanceof Obj)) return false;
 			Obj x = (Obj) o;
 			return kind.equals(x.kind) && Objects.equals(name, x.name)
-					&& idKey.equals(x.idKey) && Objects.equals(id, x.id);
+					&& idKey.equals(x.idKey) && Objects.equals(id, x.id)
+					&& Objects.equals(device, x.device);
 		}
 
 		@Override
 		public int hashCode() {
-			return Objects.hash(kind, name, idKey, id);
+			return Objects.hash(kind, name, idKey, id, device);
 		}
 
 		@Override
 		public String toString() {
-			return kind + "[" + idKey + "=" + id + ", name=" + name + "]";
+			return kind + "[" + idKey + "=" + id
+					+ (device == null ? "" : ", " + DeviceIdentity.ID_KEY + "=" + device)
+					+ ", name=" + name + "]";
 		}
 	}
 
@@ -91,6 +105,11 @@ final class SynologyTopology {
 	static final class Input<J> {
 		/** {@code SYNO.DSM.Info} response. */
 		J dsmInfo;
+		/**
+		 * Build 34 (issue #11): this cycle's DiskStation identity, carried by
+		 * every object. Required.
+		 */
+		DeviceIdentity.Id device;
 		/** {@code SYNO.Storage.CGI.Storage} load_info response. */
 		J storage;
 		/** {@code SYNO.Core.ISCSI.LUN} list response (empty when unread). */
@@ -196,12 +215,16 @@ final class SynologyTopology {
 		J dsm = data(js, in.dsmInfo);
 		J st = data(js, in.storage);
 
-		String serial = orDefault(js.str(js.get(dsm, "serial")), "unknown");
+		// Build 34 (issue #11): every object carries the DiskStation identity
+		// (the DSM serial, or the configured endpoint; see DeviceIdentity), so
+		// two NASes never share an object. The DiskStation's own serial
+		// identifier is that identity; the World is one per DiskStation.
+		final String dev = in.device.value;
 		String dsModel = orEmpty(js.str(js.get(dsm, "model")));
-		String dsName = dsModel.isEmpty() ? serial : dsModel + " " + serial;
-		Obj world = new Obj("SynologyWorld", "Synology World", "world_id",
-				"synology_world");
-		Obj diskstation = new Obj("SynologyDiskstation", dsName, "serial", serial);
+		Obj world = new Obj("SynologyWorld", in.device.worldName(), "world_id",
+				"synology_world", dev);
+		Obj diskstation = new Obj(DeviceIdentity.DISKSTATION_KIND,
+				in.device.diskstationName(dsModel), "serial", dev, null);
 		out.parent(world, diskstation);
 
 		List<J> volumes = js.list(js.get(st, "volumes"));
@@ -224,7 +247,7 @@ final class SynologyTopology {
 				}
 				String poolPath = js.str(js.get(pool, "pool_path"));
 				Obj poolKey = new Obj("SynologyStoragePool", poolName(js, pool),
-						"pool_id", poolId);
+						"pool_id", poolId, dev);
 				out.parent(diskstation, poolKey);
 
 				if (poolPath == null) {
@@ -240,11 +263,11 @@ final class SynologyTopology {
 							continue;
 						}
 						out.parent(poolKey, new Obj("SynologyVolume",
-								volumeName(js, vol), "volume_id", volId));
+								volumeName(js, vol), "volume_id", volId, dev));
 					}
 				}
-				diskEdges(js, js.get(pool, "disks"), poolKey, diskNames, out);
-				diskEdges(js, js.get(pool, "cache_disks"), poolKey, diskNames, out);
+				diskEdges(js, js.get(pool, "disks"), poolKey, diskNames, dev, out);
+				diskEdges(js, js.get(pool, "cache_disks"), poolKey, diskNames, dev, out);
 			} catch (RuntimeException e) {
 				warn.accept("Relationships: storage pool skipped, its edges are "
 						+ "left out this cycle: " + SynologyFailures.describe(e));
@@ -269,10 +292,10 @@ final class SynologyTopology {
 							String volId = volumeId(js, vol);
 							if (volId == null || !in.volumeChildren.known(location)) break;
 							out.parent(new Obj("SynologyVolume",
-									volumeName(js, vol), "volume_id", volId),
+									volumeName(js, vol), "volume_id", volId, dev),
 									new Obj("SynologyIscsiLun",
 											orDefault(js.str(js.get(lun, "name")), uuid),
-											"lun_uuid", uuid));
+											"lun_uuid", uuid, dev));
 							break;
 						}
 					}
@@ -298,9 +321,9 @@ final class SynologyTopology {
 							String volId = volumeId(js, vol);
 							if (volId == null || !in.volumeChildren.known(volPath)) break;
 							out.parent(new Obj("SynologyVolume",
-									volumeName(js, vol), "volume_id", volId),
+									volumeName(js, vol), "volume_id", volId, dev),
 									new Obj("SynologyNfsExport", name,
-											"share_name", name));
+											"share_name", name, dev));
 							break;
 						}
 					}
@@ -325,7 +348,7 @@ final class SynologyTopology {
 						continue;
 					}
 					Obj cacheKey = new Obj("SynologySsdCache",
-							cacheName(js, cache, in.storage), "cache_id", cacheId);
+							cacheName(js, cache, in.storage), "cache_id", cacheId, dev);
 					if (!in.volumeChildren.noneKnown()) {
 						J vol = volumeForCache(js, cache, volumes);
 						if (vol != null) {
@@ -333,12 +356,12 @@ final class SynologyTopology {
 							if (volId != null && in.volumeChildren.known(
 									js.str(js.get(vol, "vol_path")))) {
 								out.parent(new Obj("SynologyVolume",
-										volumeName(js, vol), "volume_id", volId),
+										volumeName(js, vol), "volume_id", volId, dev),
 										cacheKey);
 							}
 						}
 					}
-					diskEdges(js, js.get(cache, "disks"), cacheKey, diskNames, out);
+					diskEdges(js, js.get(cache, "disks"), cacheKey, diskNames, dev, out);
 				} catch (RuntimeException e) {
 					warn.accept("Relationships: SSD cache skipped, its edges are "
 							+ "left out this cycle: " + SynologyFailures.describe(e));
@@ -350,7 +373,7 @@ final class SynologyTopology {
 		if (in.ups != null && js.bool(js.get(data(js, in.ups), "usb_ups_connect"))) {
 			String upsModel = orDefault(js.str(js.get(data(js, in.ups), "model")), "UPS");
 			out.parent(diskstation, new Obj("SynologyUps", upsModel, "ups_model",
-					upsModel));
+					upsModel, dev));
 		}
 
 		if (!skipped.isEmpty()) {
@@ -361,13 +384,13 @@ final class SynologyTopology {
 	}
 
 	private static <J> void diskEdges(Json<J> js, J ids, Obj parent,
-			Map<String, String> diskNames, Edges out) {
+			Map<String, String> diskNames, String dev, Edges out) {
 		if (js.isNull(ids)) return;
 		for (J ref : js.list(ids)) {
 			String diskId = js.str(ref);
 			if (diskId != null && !diskId.isEmpty()) {
 				out.parent(parent, new Obj("SynologyDisk",
-						diskNames.getOrDefault(diskId, diskId), "disk_id", diskId));
+						diskNames.getOrDefault(diskId, diskId), "disk_id", diskId, dev));
 			}
 		}
 	}

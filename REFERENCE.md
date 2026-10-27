@@ -28,17 +28,50 @@ Generated from `describe.xml` and `resources.properties` for build 1.0.0.16.
 
 ---
 
+## DiskStation identity
+
+Build 34 (issue #11). Every object is identified by its DiskStation, so two
+adapter instances (two NASes) never write into the same object.
+
+- The identity is the DSM serial number (`SYNO.DSM.Info` `serial`). It is
+  the DiskStation's `serial` identifier, and the identifying
+  `diskstation_id` on the World and on every object below the DiskStation,
+  next to the object's own DSM-local id (`reuse_1`, `/volume1`, `sata1`,
+  ...), which is the same on most DiskStations.
+- When DSM sends no serial (blank or missing: a non-administrator account
+  or a Virtual DSM may not get one), the identity is the instance's
+  configured endpoint, `host:<host>:<port>` (host trimmed and lower-cased),
+  announced by one WARN per configuration. It changes only when the host or
+  port is edited, which re-creates the objects.
+- A cycle whose `SYNO.DSM.Info` has no serial fails (every object ERROR)
+  instead of moving the objects to the fallback identity when either a
+  serial was read earlier in this configuration, or this adapter instance
+  already has a DiskStation object whose `serial` identifier is a real
+  serial (not `host:...`, and not build 33's `unknown`). The second check
+  reads the instance's existing objects from VCF Operations, so the guard
+  holds across a collector restart, a pak upgrade and an account edit. To
+  accept the fallback identity anyway, delete that DiskStation object, then
+  save the adapter instance (or restart the collector). A serial that
+  appears while the fallback is in use is taken, and the objects move to it
+  once (one WARN).
+- The World is one per DiskStation, named `Synology World (<serial>)`.
+- An object that does not carry the current identity (one from before
+  build 34, or from an earlier fallback identity) gets no new metrics or
+  properties and is logged once at INFO. VCF Operations still shows it as
+  Data Receiving with its last values frozen until it is deleted. Delete
+  it; see the README section Upgrading.
+
 ## Object Types
 
 ### Synology World
 
-**Identifier**: `world_id` (World ID)
+**Identifiers**: `world_id` (World ID), `diskstation_id` (DiskStation ID; build 34, see [DiskStation identity](#diskstation-identity))
 
 ---
 
 ### Synology Diskstation
 
-**Identifier**: `serial` (Serial Number)
+**Identifier**: `serial` (Serial Number). Holds the DiskStation identity: the DSM serial, or `host:<host>:<port>` when DSM sends none (build 34, see [DiskStation identity](#diskstation-identity)).
 
 #### System
 
@@ -112,7 +145,7 @@ before the upgrade is 100 times the real load.
 
 ### Synology Storage Pool
 
-**Identifier**: `pool_id` (Pool ID)
+**Identifiers**: `pool_id` (Pool ID), `diskstation_id` (DiskStation ID; build 34, see [DiskStation identity](#diskstation-identity))
 
 #### Capacity
 
@@ -136,7 +169,7 @@ before the upgrade is 100 times the real load.
 
 ### Synology Volume
 
-**Identifier**: `volume_id` (Volume ID)
+**Identifiers**: `volume_id` (Volume ID), `diskstation_id` (DiskStation ID; build 34, see [DiskStation identity](#diskstation-identity))
 
 #### Capacity
 
@@ -178,7 +211,7 @@ before the upgrade is 100 times the real load.
 
 ### Synology Disk
 
-**Identifier**: `disk_id` (Disk ID)
+**Identifiers**: `disk_id` (Disk ID), `diskstation_id` (DiskStation ID; build 34, see [DiskStation identity](#diskstation-identity))
 
 #### Health
 
@@ -218,7 +251,7 @@ before the upgrade is 100 times the real load.
 
 ### Synology iSCSI LUN
 
-**Identifier**: `lun_uuid` (LUN UUID)
+**Identifiers**: `lun_uuid` (LUN UUID), `diskstation_id` (DiskStation ID; build 34, see [DiskStation identity](#diskstation-identity))
 
 #### IO
 
@@ -247,7 +280,7 @@ before the upgrade is 100 times the real load.
 
 ### Synology NFS Export
 
-**Identifier**: `share_name` (Share Name)
+**Identifiers**: `share_name` (Share Name), `diskstation_id` (DiskStation ID; build 34, see [DiskStation identity](#diskstation-identity))
 
 #### Capacity
 
@@ -285,7 +318,7 @@ before the upgrade is 100 times the real load.
 
 ### Synology UPS
 
-**Identifier**: `ups_model` (UPS Model)
+**Identifiers**: `ups_model` (UPS Model), `diskstation_id` (DiskStation ID; build 34, see [DiskStation identity](#diskstation-identity))
 
 #### Battery
 
@@ -306,7 +339,7 @@ before the upgrade is 100 times the real load.
 
 ### Synology SSD Cache
 
-**Identifier**: `cache_id` (Cache ID)
+**Identifiers**: `cache_id` (Cache ID), `diskstation_id` (DiskStation ID; build 34, see [DiskStation identity](#diskstation-identity))
 
 #### Hit Rate
 

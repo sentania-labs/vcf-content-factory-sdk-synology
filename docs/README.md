@@ -1,4 +1,4 @@
-# VCF Content Factory Synology DiskStation — Documentation
+# VCF Content Factory Synology DiskStation Documentation
 
 > Generated index. The SVG diagram and per-kind table are regenerated on every
 > build; prose sections (overview, installing) are hand-curated.
@@ -18,7 +18,7 @@
 
 ## Cross-MP Relationships
 
-These edges are created at collection time via the Suite API and never appear in `describe.xml` — they are declared explicitly in `adapter.yaml` (`cross_mp_edges`) so this generated docset doesn't silently omit them. *Italic* endpoints belong to a foreign management pack; `code` endpoints are owned by this adapter.
+These edges are created at collection time via the Suite API and never appear in `describe.xml`. They are declared explicitly in `adapter.yaml` (`cross_mp_edges`) so this generated docset doesn't silently omit them. *Italic* endpoints belong to a foreign management pack; `code` endpoints are owned by this adapter.
 
 | Parent | Child | Description |
 |--------|-------|-------------|
@@ -28,7 +28,7 @@ These edges are created at collection time via the Suite API and never appear in
 ## Quick Reference
 
 - **Adapter kind:** `synology_diskstation`
-- **Version:** 0.0.0.33
+- **Version:** 0.0.0.34
 - **Traversal spec:** Synology DiskStation Storage Tree
 - **Resource kinds:** 9
 - **Cross-MP relationships:** 2 (see [Cross-MP Relationships](#cross-mp-relationships) below)

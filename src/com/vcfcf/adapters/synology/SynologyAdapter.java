@@ -1218,8 +1218,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			prop(out, "Hardware|total_capacity",
 					String.format("%.1f GiB", totalBytes / (1024.0 * 1024.0 * 1024.0)));
 		}
-		prop(out, "Hardware|disk_failure_count",
-				String.valueOf(cache.get("disk_failure_number").asLong()));
+		// Build 35 (review W4): skipped when DSM omits disk_failure_number,
+		// never published as "0" (it feeds the SSD Cache Disk Failure symptom).
+		propIfPresent(out, "Hardware|disk_failure_count",
+				SynologyMetrics.count(SJ, cache.get("disk_failure_number")));
 	}
 
 	private void collectIscsiLun(ResourceConfig rc, Snapshot s, List<MetricData> out)

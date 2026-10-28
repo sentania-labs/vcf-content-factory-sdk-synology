@@ -207,7 +207,9 @@ Nearly Full, Disk Failing, SSD Cache Failure, Fan Failure and UPS On
 Battery. Conditions, severities and the DSM values they match:
 [REFERENCE.md, Bundled alerts](../REFERENCE.md#bundled-alerts). Fan health
 comes from DSM's System Health, which reports only its top problem, so a
-fan failure is hidden while another problem outranks it.
+fan failure is hidden while another problem outranks it, and a Fan
+Failure alert that is already open clears after 3 cycles once that
+happens, even though the fan is still failed.
 
 ## Known Limitations
 

@@ -137,7 +137,9 @@ reports a fan failure (`widget:fan_fail`, `cpu_fan_fail`,
 `eunit_fan_fail`), `normal` when DSM reports the system healthy, and
 `unknown` when another problem outranks the fans (DSM's System Health
 returns only its top problem); it is skipped when
-`SYNO.Core.System.SystemHealth` was not read.
+`SYNO.Core.System.SystemHealth` was not read. A Fan Failure alert that is
+already open cancels after 3 cycles of `unknown`, so it clears when
+another problem outranks the fan even though the fan is still failed.
 
 #### Health
 
@@ -420,6 +422,9 @@ sent, 1000 times too large; earlier builds published 0.
 | `total_capacity` | Total Capacity | property | — | — |
 | `disk_failure_count` | Disk Failure Count | property | — | — |
 
+`disk_failure_count` is DSM's `disk_failure_number`. It is skipped when DSM
+does not send it (build 35; before, a missing count was published as `0`).
+
 ---
 
 ## Traversal Spec
@@ -462,9 +467,18 @@ raise them.
 
 Value sources (DSM 7.3.2 UI code on the lab DS1520+, 2026-10-28): pool and
 volume status keys are DSM's `volume_status_*` string table (`degrade`
-Degraded, `crashed` Crashed, `deverr` Unknown Error, `ro` Read Only) plus
-the DSM 7 pool states Storage Manager treats as crashed or potentially
-crashed (`pool_crashed`, `pool_error`). Not failures, so they raise
+Degraded, `crashed` Crashed, `deverr` Unknown Error, `ro` Read Only).
+The pool and volume patterns also list `pool_crashed` and `pool_error`,
+but those values never appear in `Configuration|status`: DSM keeps them
+in the object's `space_status.status` (Storage Manager's
+`isAllowedToEject` and `isPotentialCrashed` read them there), a separate
+field whose values carry a prefix (`pool_normal` on a healthy pool,
+`fs_normal` on a healthy volume, `cache_normal` on a healthy SSD cache;
+lab DS1520+, DSM 7.3.2, 2026-10-28), while `status` reads `normal`. The
+adapter publishes the top-level `status` only, so those two alternatives
+never match. Storage Manager reads a crashed pool from the top-level
+field (`isAllocStatCrashed`: `"crashed"===this.status`). No failure value
+has been seen live on a failing pool or volume. Not failures, so they raise
 nothing: `normal` and the in-progress states (`background`, `repair`,
 `resync`, `raid_sync`, `scrubbing`, `expand`, `expand_fs`, `add_disk`,
 `create`, `creating`, `create_fs`, `delete`, `deleting`, `deactivating`,

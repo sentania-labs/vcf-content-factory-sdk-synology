@@ -127,6 +127,14 @@ def main():
         "system health is not gated on its read"
     assert 'propIfPresent(out, "Fan|fan_health", SystemHealth.fanHealth(SJ, rule))' in ds, \
         "Fan|fan_health is not SystemHealth.fanHealth"
+    # Build 35 review W4: the SSD cache failed-disk count feeds the SSD
+    # Cache Disk Failure symptom, so a count DSM omits is skipped, not "0".
+    sc = body(ADAPTER, r"private void collectSsdCache\(")
+    assert re.search(r'propIfPresent\(out, "Hardware\|disk_failure_count",\s*'
+                     r'SynologyMetrics\.count\(SJ, cache\.get\("disk_failure_number"\)\)\);',
+                     sc), "Hardware|disk_failure_count is not present-only"
+    assert ADAPTER.count('"Hardware|disk_failure_count"') == 1, \
+        "Hardware|disk_failure_count is published somewhere else too"
     print("test_collect_wiring: all assertions passed")
 
 

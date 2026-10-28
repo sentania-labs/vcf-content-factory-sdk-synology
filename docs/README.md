@@ -32,3 +32,14 @@ These edges are created at collection time via the Suite API and never appear in
 - **Traversal spec:** Synology DiskStation Storage Tree
 - **Resource kinds:** 9
 - **Cross-MP relationships:** 2 (see [Cross-MP Relationships](#cross-mp-relationships) below)
+
+## Adapter-Specific Documentation
+
+<!-- Merged from docs/_index_extra.md; edit that file, not this section. -->
+
+### Alerts
+
+The pak ships seven alerts with their symptoms and recommendations (build
+35): Storage Pool Not Healthy, Volume Not Healthy, Volume Nearly Full,
+Disk Failing, SSD Cache Failure, Fan Failure and UPS On Battery. What each
+fires on, its object and severity: [REFERENCE.md, Bundled alerts](../REFERENCE.md#bundled-alerts).

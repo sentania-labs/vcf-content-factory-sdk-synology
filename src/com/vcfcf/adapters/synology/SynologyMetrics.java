@@ -48,6 +48,18 @@ final class SynologyMetrics {
 		return s == null || s.trim().isEmpty() ? null : s;
 	}
 
+	/**
+	 * Build 35 (review W4): the node's whole-number value as text
+	 * ({@code "0"}, {@code "2"}), or {@code null} when DSM did not send it
+	 * or sent something that is not a number, so a count that was not read
+	 * is skipped, never published as {@code "0"} (which reads as "no
+	 * failures"). A fractional value is truncated toward zero.
+	 */
+	static <J> String count(SynologyTopology.Json<J> js, J node) {
+		Double d = num(js, node);
+		return d == null ? null : String.valueOf(d.longValue());
+	}
+
 	// -----------------------------------------------------------------------
 	// Issue #18: memory
 	// -----------------------------------------------------------------------

@@ -34,8 +34,8 @@ the symptom triggers and 3 before it cancels.
 
 | Alert | Object | Condition | Severity | On by default |
 |---|---|---|---|---|
-| Storage Pool Not Healthy | Storage Pool | `Configuration\|status` is a DSM failure value (`degrade`, `crashed`, `deverr`, `pool_crashed`, `pool_error`) | Critical | yes |
-| Volume Not Healthy | Volume | `Configuration\|status` is a DSM failure value (`degrade`, `crashed`, `deverr`, `ro`, `pool_crashed`, `pool_error`) | Critical | yes |
+| Storage Pool Not Healthy | Storage Pool | `Configuration\|status` is a DSM failure value (`degrade`, `crashed`, `deverr`) | Critical | yes |
+| Volume Not Healthy | Volume | `Configuration\|status` is a DSM failure value (`degrade`, `crashed`, `deverr`, `ro`) | Critical | yes |
 | Volume Nearly Full | Volume | `Capacity\|usage_pct` at or above 85 % / 95 % | Warning / Critical | yes |
 | Disk Failing | Disk | `Health\|smart_status` is `failing`, `degraded` or `access_err` / `Health\|unc_sectors` above its dynamic threshold | Critical / Warning | yes |
 | SSD Cache Failure | SSD Cache | `Hardware\|disk_failure_count` not 0, or `Configuration\|status` a DSM failure value (`degrade`, `crashed`, `deverr`, `ro`) | Critical | yes |
@@ -46,7 +46,12 @@ A status the adapter could not read is not published, so no alert fires
 on a missing value; a disk whose SMART DSM cannot read (`unknown`) raises
 nothing. Limits: DSM's System Health reports only its highest-ranked
 problem, so a fan failure is not visible (fan health `unknown`) while
-another problem outranks it; the UPS values come from DSM's own UI code
+another problem outranks it, and a Fan Failure alert that is already
+open clears after 3 cycles once another problem outranks the fan, even
+though the fan is still failed; the pool and volume patterns also list
+`pool_crashed` and `pool_error`, but DSM keeps those in a different field
+(`space_status.status`) that the adapter does not read, so they never
+appear in `Configuration|status`; the UPS values come from DSM's own UI code
 and have not yet been seen on a live UPS; the uncorrectable-sector
 symptom needs a few days of history before its dynamic threshold exists.
 The status conditions are regular expressions over DSM's own failure

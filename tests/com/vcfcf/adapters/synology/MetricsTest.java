@@ -39,6 +39,7 @@ public final class MetricsTest {
 		lunLatencyUsesTheAvgFields();
 		latenciesAreMicrosecondsPublishedAsMs();
 		loadAveragesAreDividedBy100();
+		missingFailureCountIsNotZero();
 		System.out.println("MetricsTest: all assertions passed");
 	}
 
@@ -282,5 +283,32 @@ public final class MetricsTest {
 		T.eq(null, SynologyMetrics.loadAverage(MAPS, obj("user_load", 5), "1min_load"),
 				"absent: not published, not 0");
 		T.eq(null, SynologyMetrics.loadAverage(MAPS, null, "1min_load"), "no cpu object");
+	}
+
+	/**
+	 * Build 35 (review W4): the SSD cache's {@code disk_failure_number}
+	 * becomes {@code Hardware|disk_failure_count}. DSM 7.3.2 sends it as a
+	 * number (0 on the lab DS1520+'s healthy cache, 2026-10-28); a cache
+	 * object without it must publish nothing, not "0".
+	 */
+	static void missingFailureCountIsNotZero() {
+		T.eq("0", SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", 0), "disk_failure_number")),
+				"a real 0 is published");
+		T.eq("2", SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", 2), "disk_failure_number")),
+				"two failed disks");
+		T.eq("1", SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", "1"), "disk_failure_number")),
+				"a numeric string counts");
+		T.eq(null, SynologyMetrics.count(MAPS,
+				MAPS.get(obj("mode", "read-write"), "disk_failure_number")),
+				"absent: skipped, not 0");
+		T.eq(null, SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", null), "disk_failure_number")),
+				"JSON null: skipped");
+		T.eq(null, SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", ""), "disk_failure_number")),
+				"blank: skipped");
 	}
 }

@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology Incompatible Expansion Unit"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+severity: WARNING
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Health|incompatible_expansion_units
+  operator: NOT_EQ
+  value: "0"
+
+description: >
+  Triggers when DSM reports one or more incompatible expansion units (Health|incompatible_expansion_units is not 0).

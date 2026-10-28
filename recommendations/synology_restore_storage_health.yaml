@@ -1,0 +1,10 @@
+name: "[VCF Content Factory] Synology Restore Storage Health"
+description: |
+  DSM reports a storage problem on the DiskStation: a Critical or Warning storage status, a missing storage pool, a pool waiting to be assembled, or a system partition that crashed or needs repair.
+
+  Open DSM Storage Manager and read the overall status banner and the Storage Pool and HDD/SSD pages. Note which pool, disk or expansion unit DSM names. Confirm that a current backup exists before making changes.
+
+  For a missing pool, check that every drive is seated and that the expansion unit is powered on and cabled, then reconnect or reseat whatever is absent. For a pool that is waiting to be assembled, use Online Assemble in Storage Manager once all of its drives are present.
+
+  For a system partition that needs repair, run the repair DSM offers in Storage Manager or on the Health banner. If the system partition crashed or a pool is crashed, stop writing to the affected volumes and restore from backup rather than forcing a repair. This alert has not been seen firing on a degraded system, so use DSM as the final word on what is wrong.
+adapter_kind: synology_diskstation

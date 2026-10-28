@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology System Partition Crashed"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Health|system_partition_crashed
+  operator: EQ
+  value: "true"
+
+description: >
+  Triggers when DSM reports the system partition as crashed (Health|system_partition_crashed equals true).

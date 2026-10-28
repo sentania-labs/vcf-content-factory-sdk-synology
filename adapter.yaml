@@ -38,10 +38,18 @@ bundled_content:
   symptoms:
     - symptoms/synology_disk_smart_not_normal.yaml
     - symptoms/synology_disk_unc_sectors_increasing.yaml
+    - symptoms/synology_expansion_unit_lost.yaml
     - symptoms/synology_fan_failed.yaml
+    - symptoms/synology_incompatible_expansion_unit.yaml
     - symptoms/synology_pool_status_not_normal.yaml
     - symptoms/synology_ssd_cache_disk_failure.yaml
     - symptoms/synology_ssd_cache_status_not_normal.yaml
+    - symptoms/synology_storage_critical.yaml
+    - symptoms/synology_storage_pool_awaiting_assembly.yaml
+    - symptoms/synology_storage_pool_missing.yaml
+    - symptoms/synology_storage_warning.yaml
+    - symptoms/synology_system_partition_crashed.yaml
+    - symptoms/synology_system_partition_needs_repair.yaml
     - symptoms/synology_ups_low_battery.yaml
     - symptoms/synology_ups_on_battery.yaml
     - symptoms/synology_volume_status_not_normal.yaml
@@ -49,8 +57,10 @@ bundled_content:
     - symptoms/synology_volume_usage_warning.yaml
   alerts:
     - alerts/synology_disk_failing.yaml
+    - alerts/synology_expansion_unit_lost.yaml
     - alerts/synology_fan_failure.yaml
     - alerts/synology_ssd_cache_failure.yaml
+    - alerts/synology_storage_degraded.yaml
     - alerts/synology_storage_pool_not_healthy.yaml
     - alerts/synology_ups_on_battery.yaml
     - alerts/synology_volume_nearly_full.yaml
@@ -58,7 +68,9 @@ bundled_content:
   recommendations:
     - recommendations/synology_free_volume_space.yaml
     - recommendations/synology_investigate_ssd_cache.yaml
+    - recommendations/synology_reconnect_expansion_unit.yaml
     - recommendations/synology_repair_degraded_storage.yaml
     - recommendations/synology_replace_failed_fan.yaml
     - recommendations/synology_replace_failing_disk.yaml
     - recommendations/synology_respond_to_ups_power_event.yaml
+    - recommendations/synology_restore_storage_health.yaml

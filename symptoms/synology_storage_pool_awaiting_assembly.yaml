@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology Storage Pool Awaiting Assembly"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+severity: WARNING
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Health|detected_pools
+  operator: NOT_EQ
+  value: "0"
+
+description: >
+  Triggers when DSM detects one or more storage pools awaiting assembly (Health|detected_pools is not 0).

@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology Storage Critical"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Health|storage_status
+  operator: EQ
+  value: "danger"
+
+description: >
+  Triggers when DSM Storage Manager reports the storage verdict as Critical (Health|storage_status equals danger).

@@ -1,0 +1,42 @@
+name: "[VCF Content Factory] Synology Storage Degraded"
+description: >
+  Fires when DSM reports a storage problem: a Critical or Warning storage status, a missing storage pool, a pool awaiting assembly, or a system partition that crashed or needs repair. Cancels when DSM clears the condition.
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+type: 18
+sub_type: 18
+wait_cycles: 1
+cancel_cycles: 1
+criticality: SYMPTOM_BASED
+impact:
+  badge: HEALTH
+symptom_sets:
+  operator: ANY
+  sets:
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology Storage Critical"
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology Storage Warning"
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology Storage Pool Missing"
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology Storage Pool Awaiting Assembly"
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology System Partition Crashed"
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology System Partition Needs Repair"
+recommendations:
+  - name: "[VCF Content Factory] Synology Restore Storage Health"
+    priority: 1

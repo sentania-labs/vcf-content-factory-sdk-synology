@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology Storage Warning"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+severity: WARNING
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Health|storage_status
+  operator: EQ
+  value: "attention"
+
+description: >
+  Triggers when DSM Storage Manager reports the storage verdict as Warning (Health|storage_status equals attention).

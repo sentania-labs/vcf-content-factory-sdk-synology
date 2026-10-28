@@ -55,7 +55,13 @@ import java.util.Set;
  *       there, or either key is absent (no evidence), none of the three is
  *       counted (review R3-B1). A volume whose {@code pool_path} names a
  *       pool not in {@code storagePools} also leaves the pool kind out
- *       (review R3-W1). An empty pool list
+ *       (review R3-W1), and so does a disk whose {@code used_by} names
+ *       neither a listed pool nor a listed shared cache (review R4-W1).
+ *       {@code overview_data.space_affect_by_eunit_lost} {@code true} or a
+ *       non-empty {@code incompatible_eunit} (each only when DSM sent it;
+ *       a value of the wrong type counts as affected) leaves all three out,
+ *       as an unassembled pool does: a pool on a lost or unusable
+ *       expansion unit is not gone (review R4-W1). An empty pool list
  *       also needs an empty volume list (a volume sits on a pool) and
  *       {@link #noPoolConfigured}: every disk states its {@code used_by}
  *       and none names anything but a listed shared cache. An empty volume
@@ -69,9 +75,10 @@ import java.util.Set;
  *       volume with a {@code cache.id}, and every disk stating a
  *       {@code used_by} that is empty or a listed pool.</li>
  *   <li>SSD Cache, iSCSI LUN and NFS Export also need
- *       {@link #noUnassembledPool}: each can live on an absent pool, so
- *       none is counted while a pool is missing or detected, or while DSM
- *       did not say (review R3-B1).</li>
+ *       {@link #noUnassembledPool} and no affected expansion unit: each can
+ *       live on an absent pool, so none is counted while a pool is missing
+ *       or detected, while DSM did not say (review R3-B1), or while an
+ *       expansion unit is lost or incompatible (review R4-W1).</li>
  *   <li>{@code SynologyIscsiLun}: only when {@code SYNO.Core.ISCSI.LUN} was
  *       read, its {@code luns} was a non-empty list and every LUN carried its
  *       {@code uuid}. A NAS without SAN Manager (DSM error 102, read as no
@@ -127,6 +134,10 @@ final class ReadKinds {
 	private boolean noUnassembledPool;
 	/** Review R3-W1: a volume's pool_path names an unlisted pool. */
 	private boolean poolDangling;
+	/** Review R4-W1: a disk's used_by names an unlisted pool. */
+	private boolean diskPoolDangling;
+	/** Review R4-W1: an expansion unit lost or incompatible. */
+	private boolean expansionUnitAffected;
 	/** Review R3-W1: an unlisted cache.id, or a shared cache is_missing. */
 	private boolean cacheDangling;
 
@@ -195,6 +206,28 @@ final class ReadKinds {
 			boolean sharedCacheMissing) {
 		poolDangling = volumePoolUnlisted;
 		cacheDangling = volumeCacheUnlisted || sharedCacheMissing;
+	}
+
+	/**
+	 * Review R4-W1: some disk's {@code used_by} names neither a listed pool
+	 * nor a listed shared cache ({@link StorageOverview#diskNamesUnlistedPool}).
+	 * DSM still knows the pool, so the pool list is not the inventory.
+	 */
+	void disksNameUnlistedPool(boolean unlisted) {
+		diskPoolDangling = unlisted;
+	}
+
+	/**
+	 * Review R4-W1: {@code overview_data}'s expansion-unit evidence
+	 * ({@link StorageOverview#eunitLost},
+	 * {@link StorageOverview#eunitIncompatible}). Either one leaves out
+	 * every kind that can live on a pool, as an unassembled pool does.
+	 *
+	 * @param lost         {@code space_affect_by_eunit_lost} affected
+	 * @param incompatible {@code incompatible_eunit} affected
+	 */
+	void expansionUnits(boolean lost, boolean incompatible) {
+		expansionUnitAffected = lost || incompatible;
 	}
 
 	/**
@@ -318,13 +351,17 @@ final class ReadKinds {
 		if (systemHealthRead) out.add(DISKSTATION);
 		// Review R3-B1: a missing or detected pool (or no word from DSM)
 		// leaves out every kind that can live on it.
-		boolean storageComplete = storageListsComplete && noUnassembledPool;
-		if (storageComplete && poolsRead && !poolDangling) out.add(POOL);
+		// Review R4-W1: so does a lost or incompatible expansion unit.
+		boolean everyPoolAccounted = noUnassembledPool && !expansionUnitAffected;
+		boolean storageComplete = storageListsComplete && everyPoolAccounted;
+		if (storageComplete && poolsRead && !poolDangling && !diskPoolDangling) {
+			out.add(POOL);
+		}
 		if (storageComplete && volumesRead) out.add(VOLUME);
 		if (storageComplete) out.add(DISK);
-		if (noUnassembledPool && cachesRead && !cacheDangling) out.add(CACHE);
-		if (noUnassembledPool && lunsRead) out.add(LUN);
-		if (noUnassembledPool && exportsRead) out.add(EXPORT);
+		if (everyPoolAccounted && cachesRead && !cacheDangling) out.add(CACHE);
+		if (everyPoolAccounted && lunsRead) out.add(LUN);
+		if (everyPoolAccounted && exportsRead) out.add(EXPORT);
 		if (upsRead) out.add(UPS);
 		return Collections.unmodifiableSet(out);
 	}

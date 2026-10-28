@@ -50,6 +50,8 @@ public final class ReadKindsTest {
 		volumeNamingUnlistedPoolKeepsPools();
 		unlistedOrMissingCacheKeepsCaches();
 		pagedShareListMarksNoExport();
+		diskNamingUnlistedPoolKeepsPools();
+		expansionUnitLostOrIncompatibleKeepsStorage();
 		worldIsExcluded();
 		System.out.println("ReadKindsTest: all assertions passed");
 	}
@@ -60,6 +62,8 @@ public final class ReadKindsTest {
 		r.systemHealth(true);
 		r.unassembledPools(true, 0, true, 0);
 		r.contradictions(false, false, false);
+		r.disksNameUnlistedPool(false);
+		r.expansionUnits(false, false);
 		r.storage(true, true, true, 1, 1, 7, 0, false);
 		r.ssdCaches(true, 1, 0, false);
 		r.luns(true, true, 2, 0);
@@ -549,6 +553,50 @@ public final class ReadKindsTest {
 		b.contradictions(false, false, true);
 		assertOnlyOut(b.kinds(), set(ReadKinds.CACHE), "shared cache is_missing");
 		marksNothingOf(b.kinds(), ReadKinds.CACHE, "no cache counted");
+	}
+
+	/**
+	 * Review R4-W1: a multi-pool NAS whose pool B left storagePools without
+	 * entering missing_pools or detected_pools; its disks still name it. Pool
+	 * A is still listed (pools > 0), so before the fix Pool was declared and
+	 * B counted a miss every cycle.
+	 */
+	static void diskNamingUnlistedPoolKeepsPools() {
+		ReadKinds r = complete();
+		r.disksNameUnlistedPool(StorageOverview.diskNamesUnlistedPool(
+				Arrays.asList("reuse_1", "reuse_2", "reuse_2"),
+				Arrays.asList("reuse_1"), Arrays.asList("shared_cache_1")));
+		assertOnlyOut(r.kinds(), set(ReadKinds.POOL), "disk names reuse_2");
+		Map<String, String> known = new HashMap<>();
+		known.put("pool:reuse_1", ReadKinds.POOL);
+		known.put("pool:reuse_2", ReadKinds.POOL);
+		Model m = new Model();
+		for (int i = 0; i < 30; i++) {
+			m.cycle(known, set("pool:reuse_1"), r.kinds());
+		}
+		T.check(m.misses.isEmpty() && m.marked.isEmpty(),
+				"30 cycles with reuse_2 unlisted: nothing counted");
+	}
+
+	/**
+	 * Review R4-W1: DSM's overview_data says an expansion unit was lost or
+	 * is incompatible. Nothing that can live on its pool is counted, for 30
+	 * cycles, as with an unassembled pool; DiskStation and UPS still are.
+	 */
+	static void expansionUnitLostOrIncompatibleKeepsStorage() {
+		for (boolean[] li : new boolean[][] {{true, false}, {false, true}, {true, true}}) {
+			ReadKinds r = complete();
+			r.expansionUnits(li[0], li[1]);
+			String why = "lost=" + li[0] + " incompatible=" + li[1];
+			assertOnlyOut(r.kinds(), ON_A_POOL, why + ": no storage kind");
+			for (String kind : ON_A_POOL) {
+				marksNothingOf(r.kinds(), kind, why + ": no " + kind + " counted");
+			}
+		}
+		ReadKinds ok = complete();
+		ok.expansionUnits(StorageOverview.eunitLost(false, null),
+				StorageOverview.eunitIncompatible(false, false, 0));
+		T.eq(complete().kinds(), ok.kinds(), "fields absent: no effect");
 	}
 
 	/** Review R3-N1: a share list page short of its total is partial. */

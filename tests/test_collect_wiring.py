@@ -135,6 +135,30 @@ def main():
                      sc), "Hardware|disk_failure_count is not present-only"
     assert ADAPTER.count('"Hardware|disk_failure_count"') == 1, \
         "Hardware|disk_failure_count is published somewhere else too"
+    # Build 35 review R4-W2: DSM's storage verdict and the expansion-unit
+    # and unassembled-pool signals on the DiskStation, every one
+    # present-only, from load_info (always read), published once.
+    for key, src in (
+            ("Health|storage_status_level", "SynologyMetrics.text(SJ, statusLevel)"),
+            ("Health|storage_status", "StorageOverview.level("),
+            ("Health|expansion_unit_lost", "StorageOverview.flag("),
+            ("Health|incompatible_expansion_units", "StorageOverview.count(incompatible.isList(), incompatible.size())"),
+            ("Health|missing_pools", "StorageOverview.count(missingPools.isList(), missingPools.size())"),
+            ("Health|detected_pools", "StorageOverview.count(detectedPools.isList(), detectedPools.size())"),
+            ("Health|system_partition_crashed", "StorageOverview.flag("),
+            ("Health|system_partition_needs_repair", "StorageOverview.flag(")):
+        m = re.search(r'propIfPresent\(out, "' + re.escape(key) + r'",\s*' + re.escape(src), ds)
+        assert m, f"{key} is not present-only from {src}"
+        assert ADAPTER.count('"' + key + '"') == 1, f"{key} published elsewhere too"
+    assert 'overview.get("space_affect_by_eunit_lost").asString()' in ds
+    assert 'storageData.get("env").get("status")' in ds
+    assert 'levelNames(overview.get("sample_level_str"))' in ds
+    describe = (ROOT / "describe.xml").read_text()
+    for key in ("storage_status", "storage_status_level", "expansion_unit_lost",
+                "incompatible_expansion_units", "missing_pools", "detected_pools",
+                "system_partition_crashed", "system_partition_needs_repair"):
+        assert re.search(r'<ResourceAttribute key="' + key + r'" nameKey="\d+" '
+                         r'dataType="string" isProperty="true"/>', describe), key
     print("test_collect_wiring: all assertions passed")
 
 

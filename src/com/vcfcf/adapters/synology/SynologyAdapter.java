@@ -716,6 +716,17 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 		read.contradictions(volumePoolUnlisted, volumeCacheUnlisted,
 				sharedCacheMissing);
+		// Review R4-W1: a disk naming a pool no list carries, and DSM's
+		// expansion-unit flags (each only when DSM sent it).
+		read.disksNameUnlistedPool(StorageOverview.diskNamesUnlistedPool(
+				diskUsedBy, poolIds, sharedCacheIds));
+		SimpleJson overview = storage.data().get("overview_data");
+		SimpleJson eunitLost = overview.get("space_affect_by_eunit_lost");
+		SimpleJson eunitIncompatible = overview.get("incompatible_eunit");
+		read.expansionUnits(
+				StorageOverview.eunitLost(!eunitLost.isNull(), eunitLost.asString()),
+				StorageOverview.eunitIncompatible(!eunitIncompatible.isNull(),
+						eunitIncompatible.isList(), eunitIncompatible.size()));
 		read.storage(storage.data().get("storagePools").isList(),
 				storage.data().get("volumes").isList(),
 				storage.data().get("disks").isList(), pools, volumes, disks,
@@ -1068,6 +1079,24 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 * not read is never published as {@code ""}, which a "not normal"
 	 * symptom would read as a fault. Ops keeps the last value it had.
 	 */
+	/**
+	 * Build 35 (review R4-W2): {@code overview_data.sample_level_str} as
+	 * level name to DSM's string, or {@code null} when DSM did not send it
+	 * (StorageOverview then uses the UI's defaults). A value that is not an
+	 * object maps nothing, so no level is published.
+	 */
+	static Map<String, String> levelNames(SimpleJson node) {
+		if (node.isNull()) return null;
+		Map<String, String> m = new HashMap<>();
+		if (!node.isObject()) return m;
+		for (String name : new String[] {StorageOverview.DANGER,
+				StorageOverview.ATTENTION, StorageOverview.NORMAL}) {
+			String v = SynologyMetrics.text(SJ, node.get(name));
+			if (v != null) m.put(name, v);
+		}
+		return m;
+	}
+
 	private static void propIfPresent(List<MetricData> out, String key,
 			String value) {
 		if (value != null) {
@@ -1170,6 +1199,35 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			propIfPresent(out, "Health|system_health_message", SystemHealth.message(SJ, rule));
 			propIfPresent(out, "Fan|fan_health", SystemHealth.fanHealth(SJ, rule));
 		}
+
+		// Build 35 (review R4-W2): DSM Storage Manager's own storage verdict
+		// (the Overview health card), the expansion-unit flags and DSM's
+		// missing and detected pool lists, so a pool that left storagePools
+		// is visible on the DiskStation; each key skipped when DSM did not
+		// send it. See StorageOverview.
+		SimpleJson storageData = s.storage.data();
+		SimpleJson overview = storageData.get("overview_data");
+		SimpleJson statusLevel = overview.get("status_level");
+		propIfPresent(out, "Health|storage_status_level",
+				SynologyMetrics.text(SJ, statusLevel));
+		propIfPresent(out, "Health|storage_status", StorageOverview.level(
+				statusLevel.asString(), levelNames(overview.get("sample_level_str"))));
+		propIfPresent(out, "Health|expansion_unit_lost", StorageOverview.flag(
+				overview.get("space_affect_by_eunit_lost").asString()));
+		SimpleJson incompatible = overview.get("incompatible_eunit");
+		propIfPresent(out, "Health|incompatible_expansion_units",
+				StorageOverview.count(incompatible.isList(), incompatible.size()));
+		SimpleJson missingPools = storageData.get("missing_pools");
+		propIfPresent(out, "Health|missing_pools",
+				StorageOverview.count(missingPools.isList(), missingPools.size()));
+		SimpleJson detectedPools = storageData.get("detected_pools");
+		propIfPresent(out, "Health|detected_pools",
+				StorageOverview.count(detectedPools.isList(), detectedPools.size()));
+		SimpleJson sysStatus = storageData.get("env").get("status");
+		propIfPresent(out, "Health|system_partition_crashed", StorageOverview.flag(
+				sysStatus.get("system_crashed").asString()));
+		propIfPresent(out, "Health|system_partition_needs_repair", StorageOverview.flag(
+				sysStatus.get("system_need_repair").asString()));
 
 		if (s.isRead(SnapshotReads.NFS_SERVICE)) {
 			prop(out, "NFS|nfs_enabled", nfs.data().get("enable_nfs").asBoolean() ? "true" : "false");

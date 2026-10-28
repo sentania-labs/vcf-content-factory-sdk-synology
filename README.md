@@ -183,9 +183,12 @@ omit, a shared cache DSM reports missing), and neither does a share list
 shorter than its `total`. An empty list is not proof that everything is
 gone: it counts no miss unless another DSM field shows the kind really is
 empty, so the last LUN, the last NFS export and the last volume on a pool
-are never removed automatically; delete those by hand. A missing pool keeps
-its object but raises no alert in this build (its object keeps the last
-status DSM gave while it was listed); DSM's own notification is the signal.
+are never removed automatically; delete those by hand. A missing pool, or a
+lost or incompatible expansion unit, deletes nothing. The missing pool's own
+object keeps the last status DSM gave while it was listed; the DiskStation
+shows the problem instead, through `Health|missing_pools`,
+`Health|storage_status` (DSM Storage Manager's own Healthy, Warning or
+Critical) and `Health|expansion_unit_lost`.
 Details: REFERENCE.md, Removed objects. The framework's
 own warning is in the factory's buildkit release notes
 (`.github/release-notes-buildkit.md`, Behavior since 1.0.22, "On first

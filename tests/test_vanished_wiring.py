@@ -77,6 +77,17 @@ def enumeration():
     assert ("read.contradictions(volumePoolUnlisted, volumeCacheUnlisted,\n"
             "\t\t\t\tsharedCacheMissing);") in enum
     assert enum.index("read.contradictions(") < enum.index("lastRead = new ReadRecord(")
+    # Review R4-W1: a disk naming an unlisted pool, and the expansion-unit
+    # flags, present-only, from this load_info.
+    assert ("read.disksNameUnlistedPool(StorageOverview.diskNamesUnlistedPool(\n"
+            "\t\t\t\tdiskUsedBy, poolIds, sharedCacheIds));") in enum
+    assert 'SimpleJson overview = storage.data().get("overview_data");' in enum
+    assert ("StorageOverview.eunitLost(!eunitLost.isNull(), eunitLost.asString()),"
+            in enum)
+    assert ("StorageOverview.eunitIncompatible(!eunitIncompatible.isNull(),\n"
+            "\t\t\t\t\t\teunitIncompatible.isList(), eunitIncompatible.size()));") in enum
+    for call in ("disksNameUnlistedPool", "expansionUnits"):
+        assert enum.index(f"read.{call}(") < enum.index("lastRead = new ReadRecord(")
     # Build 35 review: empty lists need evidence, gathered from this load_info.
     assert 'SimpleJson usedBy = disk.get("used_by");' in enum
     assert 'storage.data().get("sharedCaches")' in enum
@@ -99,7 +110,8 @@ def enumeration():
     assert '!upsAnswer.get("usb_ups_connect").isNull()' in enum
     # Each read is declared once.
     for call in ("systemHealth", "storage", "ssdCaches", "luns", "exports", "ups",
-                 "unassembledPools", "contradictions"):
+                 "unassembledPools", "contradictions", "disksNameUnlistedPool",
+                 "expansionUnits"):
         assert enum.count(f"read.{call}(") == 1, call
 
 

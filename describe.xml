@@ -118,6 +118,16 @@
 				<ResourceAttribute key="system_health" nameKey="320" dataType="string" isProperty="true"/>
 				<ResourceAttribute key="system_health_rule" nameKey="321" dataType="string" isProperty="true"/>
 				<ResourceAttribute key="system_health_message" nameKey="322" dataType="string" isProperty="true"/>
+				<!-- Build 35 (review R4-W2): DSM Storage Manager's storage verdict
+				     (load_info overview_data and env.status), present-only. -->
+				<ResourceAttribute key="storage_status" nameKey="323" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="storage_status_level" nameKey="324" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="expansion_unit_lost" nameKey="325" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="incompatible_expansion_units" nameKey="326" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="missing_pools" nameKey="327" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="detected_pools" nameKey="328" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="system_partition_crashed" nameKey="329" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="system_partition_needs_repair" nameKey="330" dataType="string" isProperty="true"/>
 			</ResourceGroup>
 
 			<ResourceGroup key="NFS" nameKey="70" instanced="false">

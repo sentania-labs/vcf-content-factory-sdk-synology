@@ -150,6 +150,14 @@ another problem outranks the fan even though the fan is still failed.
 | `system_health` | System Health | property | — | — |
 | `system_health_rule` | System Health Rule | property | — | — |
 | `system_health_message` | System Health Message | property | — | — |
+| `storage_status` | Storage Status | property | — | — |
+| `storage_status_level` | Storage Status Level (DSM) | property | — | — |
+| `expansion_unit_lost` | Expansion Unit Lost | property | — | — |
+| `incompatible_expansion_units` | Incompatible Expansion Units | property | — | — |
+| `missing_pools` | Missing Storage Pools | property | — | — |
+| `detected_pools` | Detected Storage Pools | property | — | — |
+| `system_partition_crashed` | System Partition Crashed | property | — | — |
+| `system_partition_needs_repair` | System Partition Needs Repair | property | — | — |
 
 Build 35: DSM's System Health widget verdict (`SYNO.Core.System.SystemHealth`).
 `system_health` is `normal`, `attention` or `danger` (DSM rule type 2, 1,
@@ -157,6 +165,35 @@ Build 35: DSM's System Health widget verdict (`SYNO.Core.System.SystemHealth`).
 `ups_status_abnormal`, `disk_health_status_error`, ...);
 `system_health_message` is the DSM string-table key of the message
 (`widget:system_ok` when healthy). Each is skipped when DSM did not send it.
+
+Build 35 (review R4-W2): DSM Storage Manager's own storage verdict, the one
+its Overview page's health card shows (Healthy, Warning, Critical), from
+storage `load_info` (`storage_panel.js` `loadOverview` and `health-card`,
+DSM 7.3.2). Each is skipped when DSM did not send it.
+- `storage_status`: `normal`, `attention` or `danger`, the name whose
+  `overview_data.sample_level_str` value equals `status_level` (DSM 7.3.2
+  sends `status_level_normal`, `status_level_abnormal`,
+  `status_level_danger`; without `sample_level_str` the UI's defaults
+  `normal`, `abnormal`, `danger` apply). Skipped when the value matches
+  none. Danger is "Issues have occurred to Storage Pool ..." in DSM.
+- `storage_status_level`: DSM's raw `overview_data.status_level`.
+- `expansion_unit_lost`: `overview_data.space_affect_by_eunit_lost`, `true`
+  or `false`. DSM's card uses it to explain a danger level ("possibly due
+  to connection issues between ... and the expansion units").
+- `incompatible_expansion_units`: how many entries `overview_data.incompatible_eunit`
+  holds (DSM: Warning, "An incompatible expansion unit ... has been
+  detected").
+- `missing_pools`, `detected_pools`: how many pools DSM lists in
+  `missing_pools` (drives absent: an expansion unit unplugged, drives
+  pulled) and `detected_pools` (awaiting Online Assemble). Such a pool has
+  left `storagePools`, so its own object keeps its last status; these
+  counts are the signal that it is gone from DSM's working set.
+- `system_partition_crashed`, `system_partition_needs_repair`:
+  `env.status.system_crashed` (DSM: Critical) and `system_need_repair`
+  (DSM: Warning, repair the system partition).
+
+The lab NAS reads `normal`, `status_level_normal`, `false`, `0`, `0`, `0`,
+`false`, `false`. No degraded value has been seen live yet.
 
 #### NFS Service
 
@@ -444,7 +481,7 @@ counts a miss (`ReadKinds`):
 | Kinds | Counted only when |
 |---|---|
 | Diskstation | `SYNO.Core.System.SystemHealth` was read too (the DiskStation itself comes from `SYNO.DSM.Info`, which every cycle needs) |
-| Storage Pool, Volume, Disk | storage `load_info` was complete: pools, volumes and disks each a list, at least one disk, every pool, volume and disk with its id (a volume's `volume_id`, else `vol_path`), and `missing_pools` and `detected_pools` both sent as lists and both empty. An empty pool or volume list counts only when both are empty and every disk states a `used_by` that is empty or a listed shared cache (no disk is in a pool). Pools also need every volume's `pool_path` to name a listed pool |
+| Storage Pool, Volume, Disk | storage `load_info` was complete: pools, volumes and disks each a list, at least one disk, every pool, volume and disk with its id (a volume's `volume_id`, else `vol_path`), and `missing_pools` and `detected_pools` both sent as lists and both empty. An empty pool or volume list counts only when both are empty and every disk states a `used_by` that is empty or a listed shared cache (no disk is in a pool). Pools also need every volume's `pool_path` to name a listed pool, and every disk's `used_by` to be empty, a listed pool or a listed shared cache. None of the three counts while `overview_data.space_affect_by_eunit_lost` is `true` or `incompatible_eunit` is non-empty (each when sent) |
 | SSD Cache | `load_info` sent `ssdCaches` as a list with an `id` on every cache, every volume's `cache.id` names a listed cache, no `sharedCaches` entry is `is_missing: true`, and no pool is missing or detected (as above). An empty list counts only when `sharedCaches` is an empty list, no volume has a `cache.id`, and every disk states a `used_by` that is empty or a listed pool |
 | iSCSI LUN | `SYNO.Core.ISCSI.LUN` was read and sent `luns` as a non-empty list with a `uuid` on every LUN, and no pool is missing or detected |
 | NFS Export | `SYNO.Core.Share` was read as a non-empty list with a name on every share and a `total` (when sent) equal to the shares returned, the NFS service was not reported off, no share's NFS rule probe failed (an answer with no rule list counts as failed), at least one share is an export, and no pool is missing or detected |
@@ -470,15 +507,21 @@ to `missing_pools`, and one waiting for Online Assemble to `detected_pools`;
 either leaves `storagePools`, and its volumes and the absent disks may leave
 theirs. So while either key holds a pool, or DSM sent neither key as a list,
 no Storage Pool, Volume, Disk, SSD Cache, iSCSI LUN or NFS Export counts a
-miss (each can live on that pool); DiskStation and UPS still do. The pool's
-object stays, logs `absent from snapshot` each cycle and keeps the status it
-last had, so Storage Pool Not Healthy does not fire for it in this build:
-DSM's status value for a pool in `missing_pools` is not yet seen (the lab
-NAS has none), and the pack publishes no value it has not seen. The same
-"pointer to an object the list omits" rule covers a volume whose `pool_path`
-names an unlisted pool (no pool counted), a volume whose `cache.id` names an
-unlisted cache or a `sharedCaches` entry with `is_missing: true` (no SSD
-cache counted). The share list pages (`limit=2` returns 2 rows of `total`
+miss (each can live on that pool); DiskStation and UPS still do. The same
+holds while `overview_data` says an expansion unit was lost
+(`space_affect_by_eunit_lost` `true`) or is incompatible (`incompatible_eunit`
+non-empty). The pool's object stays, logs `absent from snapshot` each cycle
+and keeps the status it last had, so Storage Pool Not Healthy does not fire
+for it: DSM's status value for a pool in `missing_pools` is not yet seen
+(the lab NAS has none), and the pack publishes no value it has not seen.
+The DiskStation carries the signal instead: `Health|missing_pools`,
+`Health|storage_status`, `Health|expansion_unit_lost` (see Health above).
+The same "pointer to an object the list omits" rule covers a volume whose
+`pool_path` names an unlisted pool, and a disk whose `used_by` names
+neither a listed pool nor a listed shared cache (no pool counted; an
+unknown `used_by` value, such as a hot spare, only stops pool removal on
+that NAS), and a volume whose `cache.id` names an unlisted cache or a
+`sharedCaches` entry with `is_missing: true` (no SSD cache counted). The share list pages (`limit=2` returns 2 rows of `total`
 20 on the lab NAS); a `total` other than the rows returned counts no export.
 
 So one share whose NFS probe failed counts no export miss, however long it

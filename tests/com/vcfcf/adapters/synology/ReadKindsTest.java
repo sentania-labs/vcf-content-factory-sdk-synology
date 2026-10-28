@@ -44,6 +44,12 @@ public final class ReadKindsTest {
 		noPoolConfiguredEvidence();
 		emptyCacheListNeedsEvidence();
 		dsmErrorIn200IsUnread();
+		missingOrDetectedPoolKeepsStorage();
+		absentUnassembledKeysAreNoEvidence();
+		noPoolConfiguredNeedsNoUnassembledPool();
+		volumeNamingUnlistedPoolKeepsPools();
+		unlistedOrMissingCacheKeepsCaches();
+		pagedShareListMarksNoExport();
 		worldIsExcluded();
 		System.out.println("ReadKindsTest: all assertions passed");
 	}
@@ -52,10 +58,12 @@ public final class ReadKindsTest {
 	private static ReadKinds complete() {
 		ReadKinds r = new ReadKinds();
 		r.systemHealth(true);
+		r.unassembledPools(true, 0, true, 0);
+		r.contradictions(false, false, false);
 		r.storage(true, true, true, 1, 1, 7, 0, false);
 		r.ssdCaches(true, 1, 0, false);
 		r.luns(true, true, 2, 0);
-		r.exports(true, true, 12, 0, false, 0, 10);
+		r.exports(true, true, 12, -1, 0, false, 0, 10);
 		r.ups(true, true, true, true);
 		return r;
 	}
@@ -254,7 +262,7 @@ public final class ReadKindsTest {
 	 */
 	static void nfsProbeFailureMarksNoExport() {
 		ReadKinds r = complete();
-		r.exports(true, true, 12, 0, false, 1, 10);
+		r.exports(true, true, 12, -1, 0, false, 1, 10);
 		Set<String> k = r.kinds();
 		assertOnlyOut(k, set(ReadKinds.EXPORT), "one failed probe: no export kind");
 		Map<String, String> known = new HashMap<>();
@@ -269,19 +277,19 @@ public final class ReadKindsTest {
 
 	static void shareListUnreadMarksNoExport() {
 		ReadKinds r = complete();
-		r.exports(false, false, 12, 0, false, 0, 10);
+		r.exports(false, false, 12, -1, 0, false, 0, 10);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "share list unread");
 		r = complete();
-		r.exports(false, true, 12, 0, false, 0, 10);
+		r.exports(false, true, 12, -1, 0, false, 0, 10);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "share list unread (list set)");
 		r = complete();
-		r.exports(true, true, 12, 1, false, 0, 10);
+		r.exports(true, true, 12, -1, 1, false, 0, 10);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "a share without name");
 	}
 
 	static void nfsServiceOffMarksNoExport() {
 		ReadKinds r = complete();
-		r.exports(true, true, 12, 0, true, 0, 10);
+		r.exports(true, true, 12, -1, 0, true, 0, 10);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT),
 				"NFS off: exports are ERROR, not gone");
 	}
@@ -320,7 +328,7 @@ public final class ReadKindsTest {
 
 	static void emptyShareListMarksNoExport() {
 		ReadKinds r = complete();
-		r.exports(true, true, 0, 0, false, 0, 0);
+		r.exports(true, true, 0, -1, 0, false, 0, 0);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "shares: [] is not proof");
 		marksNothingOf(r.kinds(), ReadKinds.EXPORT,
 				"30 cycles of an empty share list: no export counted");
@@ -329,10 +337,10 @@ public final class ReadKindsTest {
 	/** Every probe answered "no rules": not proof either. */
 	static void zeroExportsMarksNoExport() {
 		ReadKinds r = complete();
-		r.exports(true, true, 12, 0, false, 0, 0);
+		r.exports(true, true, 12, -1, 0, false, 0, 0);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "zero exports is not proof");
 		r = complete();
-		r.exports(true, true, 12, 0, false, 0, 1);
+		r.exports(true, true, 12, -1, 0, false, 0, 1);
 		T.check(r.kinds().contains(ReadKinds.EXPORT), "one export: read");
 	}
 
@@ -379,16 +387,16 @@ public final class ReadKindsTest {
 	}
 
 	static void noPoolConfiguredEvidence() {
-		T.check(!ReadKinds.noPoolConfigured(DEVEL_DISKS, SHARED),
+		T.check(!ReadKinds.noPoolConfigured(DEVEL_DISKS, SHARED, true),
 				"devel: disks name reuse_1, a pool");
 		T.check(ReadKinds.noPoolConfigured(Arrays.asList("", "", "shared_cache_1"),
-				SHARED), "unused disks and a cache disk: no pool");
-		T.check(!ReadKinds.noPoolConfigured(Arrays.asList("", null), SHARED),
+				SHARED, true), "unused disks and a cache disk: no pool");
+		T.check(!ReadKinds.noPoolConfigured(Arrays.asList("", null), SHARED, true),
 				"a disk with no used_by is no evidence");
 		T.check(!ReadKinds.noPoolConfigured(Arrays.asList("", "shared_cache_1"),
-				null), "sharedCaches not a list: a cache disk is unexplained");
-		T.check(!ReadKinds.noPoolConfigured(NONE, SHARED), "no disks: no evidence");
-		T.check(!ReadKinds.noPoolConfigured(null, SHARED), "no disk list: no evidence");
+				null, true), "sharedCaches not a list: a cache disk is unexplained");
+		T.check(!ReadKinds.noPoolConfigured(NONE, SHARED, true), "no disks: no evidence");
+		T.check(!ReadKinds.noPoolConfigured(null, SHARED, true), "no disk list: no evidence");
 	}
 
 	static void emptyCacheListNeedsEvidence() {
@@ -433,11 +441,127 @@ public final class ReadKindsTest {
 	static void dsmErrorIn200IsUnread() {
 		ReadKinds r = complete();
 		r.luns(false, true, 2, 0);
-		r.exports(false, true, 12, 0, false, 0, 10);
+		r.exports(false, true, 12, -1, 0, false, 0, 10);
 		assertOnlyOut(r.kinds(), set(ReadKinds.LUN, ReadKinds.EXPORT),
 				"LUN and share lists unread on a DSM error");
 		r = complete();
 		r.ups(false, true, false, false);
 		assertOnlyOut(r.kinds(), set(ReadKinds.UPS), "UPS unread on a DSM error");
+	}
+
+	// --- Build 35 review round 3 ---
+
+	private static final Set<String> ON_A_POOL = set(ReadKinds.POOL,
+			ReadKinds.VOLUME, ReadKinds.DISK, ReadKinds.CACHE, ReadKinds.LUN,
+			ReadKinds.EXPORT);
+
+	/**
+	 * Review R3-B1: an expansion unit's pool in missing_pools, or a pool
+	 * awaiting Online Assemble in detected_pools, has left storagePools
+	 * (and its volumes and disks may have left theirs). Nothing that can
+	 * live on it is counted, for 30 cycles; DiskStation and UPS still are.
+	 */
+	static void missingOrDetectedPoolKeepsStorage() {
+		for (int[] md : new int[][] {{1, 0}, {0, 1}, {2, 3}}) {
+			ReadKinds r = complete();
+			r.unassembledPools(true, md[0], true, md[1]);
+			String why = "missing=" + md[0] + " detected=" + md[1];
+			assertOnlyOut(r.kinds(), ON_A_POOL, why + ": no storage kind");
+			for (String kind : ON_A_POOL) {
+				marksNothingOf(r.kinds(), kind, why + ": no " + kind + " counted");
+			}
+			T.check(r.kinds().contains(ReadKinds.DISKSTATION)
+					&& r.kinds().contains(ReadKinds.UPS), why + ": DS and UPS read");
+		}
+		// The multi-pool path: the internal pool is still listed, so pools
+		// > 0; before the fix the DX517 pool counted a miss every cycle.
+		ReadKinds r = complete();
+		r.storage(true, true, true, 1, 1, 5, 0, false);
+		r.unassembledPools(true, 1, true, 0);
+		Map<String, String> known = new HashMap<>();
+		known.put("pool:internal", ReadKinds.POOL);
+		known.put("pool:dx517", ReadKinds.POOL);
+		known.put("vol:dx517", ReadKinds.VOLUME);
+		known.put("disk:dx517-1", ReadKinds.DISK);
+		Model m = new Model();
+		for (int i = 0; i < 30; i++) {
+			m.cycle(known, set("pool:internal"), r.kinds());
+		}
+		T.check(m.misses.isEmpty() && m.marked.isEmpty(),
+				"30 cycles with the DX517 pool missing: nothing counted");
+	}
+
+	/** Review R3-B1: a key DSM did not send is no evidence either way. */
+	static void absentUnassembledKeysAreNoEvidence() {
+		ReadKinds a = complete();
+		a.unassembledPools(false, 0, true, 0);
+		assertOnlyOut(a.kinds(), ON_A_POOL, "no missing_pools key");
+		ReadKinds b = complete();
+		b.unassembledPools(true, 0, false, 0);
+		assertOnlyOut(b.kinds(), ON_A_POOL, "no detected_pools key");
+		ReadKinds c = new ReadKinds();
+		c.systemHealth(true);
+		c.storage(true, true, true, 1, 1, 7, 0, false);
+		T.eq(set(ReadKinds.DISKSTATION), c.kinds(),
+				"unassembledPools never called: no storage kind");
+		T.check(ReadKinds.noUnassembledPool(true, 0, true, 0), "both empty lists");
+		T.check(!ReadKinds.noUnassembledPool(true, 0, false, 0), "detected absent");
+		T.check(!ReadKinds.noUnassembledPool(false, 0, true, 0), "missing absent");
+		T.check(!ReadKinds.noUnassembledPool(true, 1, true, 0), "one missing");
+		T.check(!ReadKinds.noUnassembledPool(true, 0, true, 1), "one detected");
+	}
+
+	/**
+	 * Review R3-B1, single-pool path: all HDDs pulled, the NVMe cache left,
+	 * so the disks that remain name only the shared cache. Without the
+	 * unassembled-pool evidence that is not "no pool".
+	 */
+	static void noPoolConfiguredNeedsNoUnassembledPool() {
+		List<String> cacheOnly = Arrays.asList("shared_cache_1", "shared_cache_1");
+		T.check(ReadKinds.noPoolConfigured(cacheOnly, SHARED, true),
+				"cache disks only, no missing pool: no pool");
+		T.check(!ReadKinds.noPoolConfigured(cacheOnly, SHARED, false),
+				"cache disks only, a missing pool: not evidence");
+		ReadKinds r = complete();
+		r.unassembledPools(true, 1, true, 0);
+		r.storage(true, true, true, 0, 0, 2, 0,
+				ReadKinds.noPoolConfigured(cacheOnly, SHARED, false));
+		assertOnlyOut(r.kinds(), ON_A_POOL, "HDDs pulled: nothing on a pool read");
+	}
+
+	/** Review R3-W1: a volume's pool_path names a pool storagePools omits. */
+	static void volumeNamingUnlistedPoolKeepsPools() {
+		ReadKinds r = complete();
+		r.contradictions(true, false, false);
+		assertOnlyOut(r.kinds(), set(ReadKinds.POOL), "dangling pool_path");
+		marksNothingOf(r.kinds(), ReadKinds.POOL, "no pool counted");
+	}
+
+	/**
+	 * Review R3-W1: a volume's cache.id names a cache ssdCaches omits, or a
+	 * shared cache is_missing.
+	 */
+	static void unlistedOrMissingCacheKeepsCaches() {
+		ReadKinds a = complete();
+		a.contradictions(false, true, false);
+		assertOnlyOut(a.kinds(), set(ReadKinds.CACHE), "dangling cache.id");
+		ReadKinds b = complete();
+		b.contradictions(false, false, true);
+		assertOnlyOut(b.kinds(), set(ReadKinds.CACHE), "shared cache is_missing");
+		marksNothingOf(b.kinds(), ReadKinds.CACHE, "no cache counted");
+	}
+
+	/** Review R3-N1: a share list page short of its total is partial. */
+	static void pagedShareListMarksNoExport() {
+		ReadKinds r = complete();
+		r.exports(true, true, 12, 20, 0, false, 0, 10);
+		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "12 of total 20: partial");
+		marksNothingOf(r.kinds(), ReadKinds.EXPORT, "no export counted");
+		r = complete();
+		r.exports(true, true, 12, 12, 0, false, 0, 10);
+		T.check(r.kinds().contains(ReadKinds.EXPORT), "total equals rows: read");
+		r = complete();
+		r.exports(true, true, 12, -1, 0, false, 0, 10);
+		T.check(r.kinds().contains(ReadKinds.EXPORT), "no total: read");
 	}
 }

@@ -678,16 +678,49 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				sharedCacheIds.add(sc.get("id").asString(""));
 			}
 		}
+		// Review R3-B1: DSM's Storage Manager lists pools as storagePools
+		// plus missing_pools and detected_pools; a pool in either is not
+		// gone. Both must be sent as lists and be empty.
+		SimpleJson missingPools = storage.data().get("missing_pools");
+		SimpleJson detectedPools = storage.data().get("detected_pools");
+		int missingCount = missingPools.isList() ? missingPools.asList().size() : 0;
+		int detectedCount = detectedPools.isList() ? detectedPools.asList().size() : 0;
+		boolean noUnassembledPool = ReadKinds.noUnassembledPool(
+				missingPools.isList(), missingCount, detectedPools.isList(),
+				detectedCount);
+		read.unassembledPools(missingPools.isList(), missingCount,
+				detectedPools.isList(), detectedCount);
+		// Review R3-W1: a volume pointing at a pool or cache the lists
+		// omit, or a shared cache DSM reports missing.
+		List<String> cacheIds = new ArrayList<>();
+		for (SimpleJson cache : storage.data().get("ssdCaches").asList()) {
+			cacheIds.add(cache.get("id").asString(""));
+		}
 		boolean volumeCached = false;
+		boolean volumePoolUnlisted = false;
+		boolean volumeCacheUnlisted = false;
 		for (SimpleJson vol : storage.data().get("volumes").asList()) {
-			if (!ReadKinds.noId(vol.get("cache").get("id").asString())) {
+			String volCacheId = vol.get("cache").get("id").asString();
+			if (!ReadKinds.noId(volCacheId)) {
 				volumeCached = true;
+				if (!cacheIds.contains(volCacheId)) volumeCacheUnlisted = true;
+			}
+			String poolPath = vol.get("pool_path").asString();
+			if (!ReadKinds.noId(poolPath) && !poolIds.contains(poolPath)) {
+				volumePoolUnlisted = true;
 			}
 		}
+		boolean sharedCacheMissing = false;
+		for (SimpleJson sc : sharedCaches.asList()) {
+			if (sc.get("is_missing").asBoolean()) sharedCacheMissing = true;
+		}
+		read.contradictions(volumePoolUnlisted, volumeCacheUnlisted,
+				sharedCacheMissing);
 		read.storage(storage.data().get("storagePools").isList(),
 				storage.data().get("volumes").isList(),
 				storage.data().get("disks").isList(), pools, volumes, disks,
-				storageNoId, ReadKinds.noPoolConfigured(diskUsedBy, sharedCacheIds));
+				storageNoId, ReadKinds.noPoolConfigured(diskUsedBy, sharedCacheIds,
+						noUnassembledPool));
 		SimpleJson ssdCaches = storage.data().get("ssdCaches");
 		if (!ssdCaches.isNull()) {
 			for (SimpleJson cache : ssdCaches.asList()) {
@@ -727,9 +760,13 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				exports++;
 			}
 		}
-		// Build 35: one failed share probe leaves every export out.
+		// Build 35: one failed share probe leaves every export out. Review
+		// R3-N1: the share list pages; a total other than the rows
+		// returned is a partial list (an absent total is -1).
+		SimpleJson shareTotal = s.shares.data().get("total");
 		read.exports(s.isRead(SnapshotReads.SHARES), shareList.isList(),
 				shareList.isList() ? shareList.asList().size() : 0,
+				shareTotal.isNull() ? -1 : (int) shareTotal.asLong(),
 				sharesNoName, s.nfsDisabled, s.nfsProbeFailed.size(), exports);
 
 		// UPS (optional): present in the snapshot only when usb_ups_connect=true.

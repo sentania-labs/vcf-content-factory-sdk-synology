@@ -94,6 +94,15 @@ normally — collection is never failed over the optional cross-link.
 
 ## Notable Behaviors
 
+- **Objects DSM no longer reports are marked Not Existing and deleted
+  (build 35).** Missing for 12 consecutive complete cycles, an object is
+  marked Not Existing and VCF Operations deletes it, with its history,
+  after the Deleted Objects retention. Only a kind read in full counts: a
+  failed read, an empty list without DSM's evidence, or a pool DSM reports
+  missing or awaiting assembly counts nothing for the kinds it touches.
+  The first upgrade removes the pre-build-34 leftovers. Rules:
+  [REFERENCE.md, Removed objects](../REFERENCE.md#removed-objects).
+
 - **Each NAS has its own objects (build 34, issue #11).** Every object is
   identified by its DiskStation: the DSM serial number, or the account's
   `host:<host>:<port>` when DSM sends none (announced by one WARN). Before

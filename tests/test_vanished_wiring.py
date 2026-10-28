@@ -54,7 +54,29 @@ def enumeration():
     st = enum.index("read.storage(")
     assert st > enum.index('storage.data().get("disks").asList()')
     assert ('storage.data().get("disks").isList(), pools, volumes, disks,\n'
-            '\t\t\t\tstorageNoId, ReadKinds.noPoolConfigured(diskUsedBy, sharedCacheIds));') in enum
+            '\t\t\t\tstorageNoId, ReadKinds.noPoolConfigured(diskUsedBy, sharedCacheIds,\n'
+            '\t\t\t\t\t\tnoUnassembledPool));') in enum
+    # Review R3-B1: missing_pools and detected_pools, both lists and empty,
+    # gate the storage kinds and the no-pool evidence alike.
+    assert 'SimpleJson missingPools = storage.data().get("missing_pools");' in enum
+    assert 'SimpleJson detectedPools = storage.data().get("detected_pools");' in enum
+    assert ("int missingCount = missingPools.isList() ? missingPools.asList().size() : 0;"
+            in enum)
+    assert ("int detectedCount = detectedPools.isList() ? detectedPools.asList().size() : 0;"
+            in enum)
+    assert ("read.unassembledPools(missingPools.isList(), missingCount,\n"
+            "\t\t\t\tdetectedPools.isList(), detectedCount);") in enum
+    assert ("boolean noUnassembledPool = ReadKinds.noUnassembledPool(\n"
+            "\t\t\t\tmissingPools.isList(), missingCount, detectedPools.isList(),\n"
+            "\t\t\t\tdetectedCount);") in enum
+    # Review R3-W1: dangling pool_path and cache.id, and is_missing caches.
+    assert "if (!cacheIds.contains(volCacheId)) volumeCacheUnlisted = true;" in enum
+    assert 'String poolPath = vol.get("pool_path").asString();' in enum
+    assert "if (!ReadKinds.noId(poolPath) && !poolIds.contains(poolPath)) {" in enum
+    assert 'if (sc.get("is_missing").asBoolean()) sharedCacheMissing = true;' in enum
+    assert ("read.contradictions(volumePoolUnlisted, volumeCacheUnlisted,\n"
+            "\t\t\t\tsharedCacheMissing);") in enum
+    assert enum.index("read.contradictions(") < enum.index("lastRead = new ReadRecord(")
     # Build 35 review: empty lists need evidence, gathered from this load_info.
     assert 'SimpleJson usedBy = disk.get("used_by");' in enum
     assert 'storage.data().get("sharedCaches")' in enum
@@ -69,11 +91,15 @@ def enumeration():
     assert "for (SimpleJson share : shareList.asList())" in enum
     assert ("read.exports(s.isRead(SnapshotReads.SHARES), shareList.isList(),\n"
             "\t\t\t\tshareList.isList() ? shareList.asList().size() : 0,\n"
+            "\t\t\t\tshareTotal.isNull() ? -1 : (int) shareTotal.asLong(),\n"
             "\t\t\t\tsharesNoName, s.nfsDisabled, s.nfsProbeFailed.size(), exports);") in enum
+    # Review R3-N1: the total is the share list's own.
+    assert 'SimpleJson shareTotal = s.shares.data().get("total");' in enum
     assert "read.ups(upsAnswer != null," in enum
     assert '!upsAnswer.get("usb_ups_connect").isNull()' in enum
     # Each read is declared once.
-    for call in ("systemHealth", "storage", "ssdCaches", "luns", "exports", "ups"):
+    for call in ("systemHealth", "storage", "ssdCaches", "luns", "exports", "ups",
+                 "unassembledPools", "contradictions"):
         assert enum.count(f"read.{call}(") == 1, call
 
 

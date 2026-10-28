@@ -444,10 +444,10 @@ counts a miss (`ReadKinds`):
 | Kinds | Counted only when |
 |---|---|
 | Diskstation | `SYNO.Core.System.SystemHealth` was read too (the DiskStation itself comes from `SYNO.DSM.Info`, which every cycle needs) |
-| Storage Pool, Volume, Disk | storage `load_info` was complete: pools, volumes and disks each a list, at least one disk, and every pool, volume and disk with its id (a volume's `volume_id`, else `vol_path`). An empty pool or volume list counts only when both are empty and every disk states a `used_by` that is empty or a listed shared cache (no disk is in a pool) |
-| SSD Cache | `load_info` sent `ssdCaches` as a list with an `id` on every cache. An empty list counts only when `sharedCaches` is an empty list, no volume has a `cache.id`, and every disk states a `used_by` that is empty or a listed pool |
-| iSCSI LUN | `SYNO.Core.ISCSI.LUN` was read and sent `luns` as a non-empty list with a `uuid` on every LUN |
-| NFS Export | `SYNO.Core.Share` was read as a non-empty list with a name on every share, the NFS service was not reported off, no share's NFS rule probe failed (an answer with no rule list counts as failed), and at least one share is an export |
+| Storage Pool, Volume, Disk | storage `load_info` was complete: pools, volumes and disks each a list, at least one disk, every pool, volume and disk with its id (a volume's `volume_id`, else `vol_path`), and `missing_pools` and `detected_pools` both sent as lists and both empty. An empty pool or volume list counts only when both are empty and every disk states a `used_by` that is empty or a listed shared cache (no disk is in a pool). Pools also need every volume's `pool_path` to name a listed pool |
+| SSD Cache | `load_info` sent `ssdCaches` as a list with an `id` on every cache, every volume's `cache.id` names a listed cache, no `sharedCaches` entry is `is_missing: true`, and no pool is missing or detected (as above). An empty list counts only when `sharedCaches` is an empty list, no volume has a `cache.id`, and every disk states a `used_by` that is empty or a listed pool |
+| iSCSI LUN | `SYNO.Core.ISCSI.LUN` was read and sent `luns` as a non-empty list with a `uuid` on every LUN, and no pool is missing or detected |
+| NFS Export | `SYNO.Core.Share` was read as a non-empty list with a name on every share and a `total` (when sent) equal to the shares returned, the NFS service was not reported off, no share's NFS rule probe failed (an answer with no rule list counts as failed), at least one share is an export, and no pool is missing or detected |
 | UPS | `SYNO.Core.ExternalDevice.UPS` answered with `usb_ups_connect`, and with the `model` when a UPS is connected; an answer of no UPS connected counts the old UPS as gone |
 
 **An empty answer is not proof that everything is gone.** An empty list
@@ -461,6 +461,25 @@ hand. The same holds for the last pool or SSD cache when a disk does not
 state its `used_by` (DSM's value for an unused disk is not yet seen live).
 A DSM error inside an HTTP 200 (`success: false`) is a failed read, never an
 empty one: the endpoint is unread and its kind counts nothing.
+
+**A missing pool is not a deleted pool.** DSM's Storage Manager lists pools
+as `storagePools` plus `detected_pools` plus `missing_pools`
+(`PoolModule.loadPool` in DSM's `storage_panel.js`). A pool whose drives are
+absent (an expansion unit unplugged or without power, drives pulled) moves
+to `missing_pools`, and one waiting for Online Assemble to `detected_pools`;
+either leaves `storagePools`, and its volumes and the absent disks may leave
+theirs. So while either key holds a pool, or DSM sent neither key as a list,
+no Storage Pool, Volume, Disk, SSD Cache, iSCSI LUN or NFS Export counts a
+miss (each can live on that pool); DiskStation and UPS still do. The pool's
+object stays, logs `absent from snapshot` each cycle and keeps the status it
+last had, so Storage Pool Not Healthy does not fire for it in this build:
+DSM's status value for a pool in `missing_pools` is not yet seen (the lab
+NAS has none), and the pack publishes no value it has not seen. The same
+"pointer to an object the list omits" rule covers a volume whose `pool_path`
+names an unlisted pool (no pool counted), a volume whose `cache.id` names an
+unlisted cache or a `sharedCaches` entry with `is_missing: true` (no SSD
+cache counted). The share list pages (`limit=2` returns 2 rows of `total`
+20 on the lab NAS); a `total` other than the rows returned counts no export.
 
 So one share whose NFS probe failed counts no export miss, however long it
 lasts, nor does a failed UPS, LUN or System Health read for its kind; the

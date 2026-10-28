@@ -173,11 +173,20 @@ hand once its children are gone.
 Only a kind read in full counts a miss, so a failed read never deletes
 anything: one share whose NFS rule probe failed counts no export miss that
 cycle, and a failed UPS, SSD cache, iSCSI or System Health read counts no
-miss for its kind. An empty list is not proof that everything is gone: it
-counts no miss unless another DSM field shows the kind really is empty, so
-the last LUN, the last NFS export and the last volume on a pool are never
-removed automatically; delete those by hand. Details: REFERENCE.md, Removed
-objects. The framework's
+miss for its kind. A storage pool DSM reports missing or awaiting assembly
+(an expansion unit unplugged, drives pulled, a pool to assemble after a
+migration) is not gone either: while DSM lists one in `missing_pools` or
+`detected_pools`, or sends neither key, no pool, volume, disk, SSD cache,
+LUN or NFS export is counted. Lists that contradict each other count
+nothing for the kind they point at (a volume on a pool or cache the lists
+omit, a shared cache DSM reports missing), and neither does a share list
+shorter than its `total`. An empty list is not proof that everything is
+gone: it counts no miss unless another DSM field shows the kind really is
+empty, so the last LUN, the last NFS export and the last volume on a pool
+are never removed automatically; delete those by hand. A missing pool keeps
+its object but raises no alert in this build (its object keeps the last
+status DSM gave while it was listed); DSM's own notification is the signal.
+Details: REFERENCE.md, Removed objects. The framework's
 own warning is in the factory's buildkit release notes
 (`.github/release-notes-buildkit.md`, Behavior since 1.0.22, "On first
 opt-in, every orphan goes").

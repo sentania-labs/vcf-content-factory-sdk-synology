@@ -15,7 +15,8 @@ note: [README.md, To build 35](../README.md#to-build-35-objects-dsm-no-longer-re
 
 ### Alerts
 
-The pak ships seven alerts with their symptoms and recommendations (build
+The pak ships nine alerts with their symptoms and recommendations (build
 35): Storage Pool Not Healthy, Volume Not Healthy, Volume Nearly Full,
-Disk Failing, SSD Cache Failure, Fan Failure and UPS On Battery. What each
+Disk Failing, SSD Cache Failure, Fan Failure, UPS On Battery, Storage
+Degraded and Expansion Unit Lost. What each
 fires on, its object and severity: [REFERENCE.md, Bundled alerts](../REFERENCE.md#bundled-alerts).

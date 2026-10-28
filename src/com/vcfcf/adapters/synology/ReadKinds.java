@@ -209,8 +209,9 @@ final class ReadKinds {
 	}
 
 	/**
-	 * Review R4-W1: some disk's {@code used_by} names neither a listed pool
-	 * nor a listed shared cache ({@link StorageOverview#diskNamesUnlistedPool}).
+	 * Review R4-W1: some disk's {@code used_by} names neither a listed pool,
+	 * a listed shared or SSD cache nor a hot spare
+	 * ({@link StorageOverview#diskNamesUnlistedPool}).
 	 * DSM still knows the pool, so the pool list is not the inventory.
 	 */
 	void disksNameUnlistedPool(boolean unlisted) {

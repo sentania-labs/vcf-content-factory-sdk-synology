@@ -188,9 +188,21 @@ DSM 7.3.2). Each is skipped when DSM did not send it.
   pulled) and `detected_pools` (awaiting Online Assemble). Such a pool has
   left `storagePools`, so its own object keeps its last status; these
   counts are the signal that it is gone from DSM's working set.
-- `system_partition_crashed`, `system_partition_needs_repair`:
-  `env.status.system_crashed` (DSM: Critical) and `system_need_repair`
-  (DSM: Warning, repair the system partition).
+- `system_partition_crashed`: `env.status.system_crashed` (DSM:
+  Critical).
+- `system_partition_needs_repair`: DSM's "repair system partition"
+  Warning, as Storage Manager shows it (`showRepairSysPartition`):
+  `true` when `env.status.system_need_repair` or `rootbackup_need_repair`
+  is `true` and the system partition is not crashed (`system_crashed`),
+  not rebuilding (`system_rebuilding`, `rootbackup_rebuilding`) and
+  `storage_status` is not `danger`; `false` when one of those holds (DSM
+  shows the crash, the rebuild or the Critical verdict instead) or when
+  `system_need_repair` is `false` and the root backup flag is not `true`.
+  Skipped when no repair flag is `true` and `system_need_repair` is not a
+  boolean. DSM 7.3.2 on the lab sends `system_crashed`,
+  `system_need_repair` and `system_rebuilding` (all `false`) and no
+  `rootbackup_*` keys; a suppressing key DSM does not send does not
+  suppress, as in the UI.
 
 The lab NAS reads `normal`, `status_level_normal`, `false`, `0`, `0`, `0`,
 `false`, `false`. No degraded value has been seen live yet.
@@ -518,11 +530,22 @@ The DiskStation carries the signal instead: `Health|missing_pools`,
 `Health|storage_status`, `Health|expansion_unit_lost` (see Health above).
 The same "pointer to an object the list omits" rule covers a volume whose
 `pool_path` names an unlisted pool, and a disk whose `used_by` names
-neither a listed pool nor a listed shared cache (no pool counted; an
-unknown `used_by` value, such as a hot spare, only stops pool removal on
-that NAS), and a volume whose `cache.id` names an unlisted cache or a
+neither a listed pool, a listed shared cache, a listed SSD cache
+(`ssdCaches[].id`) nor a hot spare (`hotspare`) (no pool counted), and a volume whose `cache.id` names an unlisted cache or a
 `sharedCaches` entry with `is_missing: true` (no SSD cache counted). The share list pages (`limit=2` returns 2 rows of `total`
 20 on the lab NAS); a `total` other than the rows returned counts no export.
+
+**An unknown disk `used_by` keeps pool removal off on that NAS.** The
+accepted values come from DSM's `storage_panel.js`: a hot spare is
+`hotspare` (`isHotspare`, `notUsedBySpace`), and a disk in a non-shared
+SSD cache names a space id of type `ssd`, the same type as that cache's
+own id (`isSingleCache`, `relatedPoolArr`), so a `used_by` equal to a
+listed `ssdCaches[].id` is accepted. Neither has been seen live (the lab's
+disks name `reuse_1` or `shared_cache_1`; its only SSD cache,
+`alloc_cache_1_1`, sits on the shared cache). Any other value (a cache id
+in a form that is not exactly the listed id, `system`, a value from a newer
+DSM) counts no Storage Pool miss for as long as a disk carries it, with no
+log line; pools are then never marked, never deleted, on that NAS.
 
 So one share whose NFS probe failed counts no export miss, however long it
 lasts, nor does a failed UPS, LUN or System Health read for its kind; the
@@ -575,7 +598,7 @@ the tree showed the instance and nothing under it (devel and devel_9_1,
 
 ## Bundled alerts
 
-Build 35 (issue #35). All seven are enabled in the default policy after
+Build 35 (issue #35). All nine are enabled in the default policy after
 install. Every symptom waits 3 cycles to trigger and 3 to cancel. A status
 the adapter could not read is not published, so no symptom fires on a
 missing value. Symptom and alert names carry the `[VCF Content Factory]
@@ -592,6 +615,8 @@ raise them.
 | SSD Cache Failure | SSD Cache | SSD Cache Disk Failure / SSD Cache Failed | `Hardware\|disk_failure_count` != `0` / `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro)$` | Critical | yes |
 | Fan Failure | DiskStation | Fan Failed | `Fan\|fan_health` = `failed` | Critical | yes |
 | UPS On Battery | UPS | UPS On Battery / UPS Low Battery | `Status\|status` = `usb_ups_status_battery` / = `usb_ups_status_low_batt` | Warning / Critical | yes |
+| Storage Degraded | DiskStation | Storage Critical / Storage Warning / Storage Pool Missing / Storage Pool Awaiting Assembly / System Partition Crashed / System Partition Needs Repair (any one) | `Health\|storage_status` = `danger` / = `attention` / `Health\|missing_pools` != `0` / `Health\|detected_pools` != `0` / `Health\|system_partition_crashed` = `true` / `Health\|system_partition_needs_repair` = `true` | Critical / Warning / Critical / Warning / Critical / Warning | yes |
+| Expansion Unit Lost | DiskStation | Expansion Unit Lost **and** Storage Critical / Incompatible Expansion Unit | `Health\|expansion_unit_lost` = `true` and `Health\|storage_status` = `danger` / `Health\|incompatible_expansion_units` != `0` | Critical / Warning | yes |
 
 Value sources (DSM 7.3.2 UI code on the lab DS1520+, 2026-10-28): pool and
 volume status keys are DSM's `volume_status_*` string table (`degrade`
@@ -618,4 +643,15 @@ nothing: `normal` and the in-progress states (`background`, `repair`,
 DSM's `ups` string table (`usb_ups_status_online` Connected,
 `usb_ups_status_battery` On Battery, `usb_ups_status_low_batt` Low
 Battery, `usb_ups_status_off` Off; `usb_ups_status_unknown` with no UPS),
-not yet seen on a live UPS.
+not yet seen on a live UPS. Storage Degraded and Expansion Unit Lost:
+the DiskStation properties under Health above, from storage `load_info`,
+read as DSM Storage Manager's health card reads them (`storage_panel.js`,
+DSM 7.3.2): `storage_status` `danger` is Critical and `attention` Warning
+(`isLevelDanger`, `isLevelAttention`), a non-empty `incompatible_eunit`
+is a Warning row, `system_crashed` a Critical row, and
+`system_partition_needs_repair` is the UI's "repair system partition"
+Warning row. Expansion Unit Lost's first set needs both symptoms because
+the UI uses `space_affect_by_eunit_lost` only together with a danger level
+(`isSpaceIssueByMultipath && isLevelDanger(...)`); that danger level also
+raises Storage Degraded. Not seen degraded live: the lab DS1520+ reads
+`normal`, `false`, `0` everywhere (2026-10-28).

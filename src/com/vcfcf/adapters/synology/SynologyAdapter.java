@@ -719,7 +719,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		// Review R4-W1: a disk naming a pool no list carries, and DSM's
 		// expansion-unit flags (each only when DSM sent it).
 		read.disksNameUnlistedPool(StorageOverview.diskNamesUnlistedPool(
-				diskUsedBy, poolIds, sharedCacheIds));
+				diskUsedBy, poolIds, sharedCacheIds, cacheIds));
 		SimpleJson overview = storage.data().get("overview_data");
 		SimpleJson eunitLost = overview.get("space_affect_by_eunit_lost");
 		SimpleJson eunitIncompatible = overview.get("incompatible_eunit");
@@ -1074,12 +1074,6 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	}
 
 	/**
-	 * Build 35 (review W1): publishes {@code value} unless it is {@code null}
-	 * (DSM did not send the field, or sent it blank), so a status that was
-	 * not read is never published as {@code ""}, which a "not normal"
-	 * symptom would read as a fault. Ops keeps the last value it had.
-	 */
-	/**
 	 * Build 35 (review R4-W2): {@code overview_data.sample_level_str} as
 	 * level name to DSM's string, or {@code null} when DSM did not send it
 	 * (StorageOverview then uses the UI's defaults). A value that is not an
@@ -1097,6 +1091,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		return m;
 	}
 
+	/**
+	 * Build 35 (review W1): publishes {@code value} unless it is {@code null}
+	 * (DSM did not send the field, or sent it blank), so a status that was
+	 * not read is never published as {@code ""}, which a "not normal"
+	 * symptom would read as a fault. Ops keeps the last value it had.
+	 */
 	private static void propIfPresent(List<MetricData> out, String key,
 			String value) {
 		if (value != null) {
@@ -1210,8 +1210,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson statusLevel = overview.get("status_level");
 		propIfPresent(out, "Health|storage_status_level",
 				SynologyMetrics.text(SJ, statusLevel));
-		propIfPresent(out, "Health|storage_status", StorageOverview.level(
-				statusLevel.asString(), levelNames(overview.get("sample_level_str"))));
+		String storageLevel = StorageOverview.level(statusLevel.asString(),
+				levelNames(overview.get("sample_level_str")));
+		propIfPresent(out, "Health|storage_status", storageLevel);
 		propIfPresent(out, "Health|expansion_unit_lost", StorageOverview.flag(
 				overview.get("space_affect_by_eunit_lost").asString()));
 		SimpleJson incompatible = overview.get("incompatible_eunit");
@@ -1226,8 +1227,16 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson sysStatus = storageData.get("env").get("status");
 		propIfPresent(out, "Health|system_partition_crashed", StorageOverview.flag(
 				sysStatus.get("system_crashed").asString()));
-		propIfPresent(out, "Health|system_partition_needs_repair", StorageOverview.flag(
-				sysStatus.get("system_need_repair").asString()));
+		// Review R5-N3: DSM's "repair system partition" prompt as Storage
+		// Manager shows it (showRepairSysPartition).
+		propIfPresent(out, "Health|system_partition_needs_repair",
+				StorageOverview.systemPartitionNeedsRepair(
+						sysStatus.get("system_need_repair").asString(),
+						sysStatus.get("rootbackup_need_repair").asString(),
+						sysStatus.get("system_crashed").asString(),
+						sysStatus.get("system_rebuilding").asString(),
+						sysStatus.get("rootbackup_rebuilding").asString(),
+						storageLevel));
 
 		if (s.isRead(SnapshotReads.NFS_SERVICE)) {
 			prop(out, "NFS|nfs_enabled", nfs.data().get("enable_nfs").asBoolean() ? "true" : "false");

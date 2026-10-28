@@ -110,25 +110,90 @@ final class StorageOverview {
 	}
 
 	/**
+	 * Review R5-N3: DSM's "repair system partition" prompt, as Storage
+	 * Manager shows it. {@code storage_panel.js} (DSM 7.3.2, read
+	 * 2026-10-28) shows it when {@code showRepairSysPartition}:
+	 * {@code !sysRAIDCrashed && !sysRAIDRebuilding &&
+	 * !isLevelDanger(spaceStatusLevel) && (hasSysPartFailedDisk ||
+	 * hasRootBackupFailedDisk)}, where the last two are
+	 * {@code env.status.system_need_repair === true} and
+	 * {@code rootbackup_need_repair === true}, {@code sysRAIDCrashed} is
+	 * {@code system_crashed} and {@code sysRAIDRebuilding} is
+	 * {@code system_rebuilding || rootbackup_rebuilding}. So {@code "true"}
+	 * when either repair flag is true and none of crashed, rebuilding or a
+	 * Critical storage level holds (those have their own rows, and the
+	 * crashed and Critical ones their own symptoms); {@code "false"} when
+	 * a repair flag is true but one of them holds, or when
+	 * {@code system_need_repair} is {@code false} and the root backup flag
+	 * is not true ({@code rootbackup_need_repair} is absent on the lab
+	 * DS1520+, which the UI reads as not needing repair); {@code null}
+	 * (skipped) when no repair flag is true and {@code system_need_repair}
+	 * is not a boolean. A suppressor DSM did not send does not suppress,
+	 * as in the UI. The lab sends {@code system_crashed},
+	 * {@code system_need_repair} and {@code system_rebuilding}, all false.
+	 *
+	 * @param storageLevel {@link #level}'s result for the same response, or null
+	 */
+	static String systemPartitionNeedsRepair(String systemNeedRepair,
+			String rootbackupNeedRepair, String systemCrashed,
+			String systemRebuilding, String rootbackupRebuilding,
+			String storageLevel) {
+		boolean needsRepair = "true".equals(flag(systemNeedRepair))
+				|| "true".equals(flag(rootbackupNeedRepair));
+		if (!needsRepair) {
+			return "false".equals(flag(systemNeedRepair)) ? "false" : null;
+		}
+		boolean shownElsewhere = "true".equals(flag(systemCrashed))
+				|| "true".equals(flag(systemRebuilding))
+				|| "true".equals(flag(rootbackupRebuilding))
+				|| DANGER.equals(storageLevel);
+		return shownElsewhere ? "false" : "true";
+	}
+
+	/**
+	 * DSM's {@code used_by} for a hot spare disk: {@code storage_panel.js}
+	 * {@code isHotspare(){return "hotspare"===this.used_by}} and
+	 * {@code notUsedBySpace()} (empty or {@code hotspare}). Not seen live:
+	 * the lab NAS has no hot spare.
+	 */
+	static final String HOT_SPARE = "hotspare";
+
+	/**
 	 * Review R4-W1: some disk's {@code used_by} names something that is
-	 * neither a listed pool nor a listed shared cache. A disk in a pool
-	 * names the pool ({@code reuse_1} on the lab), so a pool that left
-	 * {@code storagePools} without entering {@code missing_pools} or
-	 * {@code detected_pools} still shows here. An unknown value (a hot
-	 * spare, a new DSM name) fails safe: pools are left out, never marked.
+	 * neither a listed pool, a listed shared cache, a listed SSD cache nor
+	 * a hot spare. A disk in a pool names the pool ({@code reuse_1} on the
+	 * lab), so a pool that left {@code storagePools} without entering
+	 * {@code missing_pools} or {@code detected_pools} still shows here. An
+	 * unknown value (a new DSM name, {@code system}) fails safe: pools are
+	 * left out, never marked.
+	 *
+	 * <p>Review R5-N4: a disk in a non-shared SSD cache names the cache. DSM
+	 * parses both the disk's {@code used_by} and a single cache's id as a
+	 * space id of type {@code ssd} ({@code storage_panel.js}
+	 * {@code isSingleCache}, {@code relatedPoolArr}), so a {@code used_by}
+	 * equal to a listed {@code ssdCaches[].id} is accepted; that format is
+	 * from DSM's code, not seen live (the lab's only cache is shared:
+	 * disks name {@code shared_cache_1}, the cache is
+	 * {@code alloc_cache_1_1}), and a value that is not exactly a listed
+	 * cache id still keeps pool removal off. A hot spare's
+	 * {@link #HOT_SPARE} names no space.
 	 *
 	 * @param diskUsedBy     one entry per disk, its {@code used_by} or null
 	 *                       (null and empty name nothing)
 	 * @param poolIds        {@code storagePools[].id}
 	 * @param sharedCacheIds {@code sharedCaches[].id}, or null when not a list
+	 * @param ssdCacheIds    {@code ssdCaches[].id}, or null
 	 */
 	static boolean diskNamesUnlistedPool(List<String> diskUsedBy,
-			Collection<String> poolIds, Collection<String> sharedCacheIds) {
+			Collection<String> poolIds, Collection<String> sharedCacheIds,
+			Collection<String> ssdCacheIds) {
 		if (diskUsedBy == null) return false;
 		for (String u : diskUsedBy) {
 			if (u == null || u.isEmpty()) continue;
+			if (HOT_SPARE.equals(u)) continue;
 			if (poolIds != null && poolIds.contains(u)) continue;
 			if (sharedCacheIds != null && sharedCacheIds.contains(u)) continue;
+			if (ssdCacheIds != null && ssdCacheIds.contains(u)) continue;
 			return true;
 		}
 		return false;

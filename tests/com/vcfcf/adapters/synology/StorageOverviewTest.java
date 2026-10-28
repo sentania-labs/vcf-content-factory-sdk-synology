@@ -24,6 +24,7 @@ public final class StorageOverviewTest {
 		flagsAndCounts();
 		expansionUnitEvidence();
 		diskNamingUnlistedPool();
+		systemPartitionRepairFollowsTheUi();
 		System.out.println("StorageOverviewTest: all assertions passed");
 	}
 
@@ -84,19 +85,73 @@ public final class StorageOverviewTest {
 	static void diskNamingUnlistedPool() {
 		List<String> pools = Arrays.asList("reuse_1");
 		List<String> shared = Arrays.asList("shared_cache_1");
+		List<String> caches = Arrays.asList("alloc_cache_1_1");
 		List<String> lab = Arrays.asList("reuse_1", "reuse_1", "reuse_1",
 				"reuse_1", "reuse_1", "shared_cache_1", "shared_cache_1");
-		T.check(!StorageOverview.diskNamesUnlistedPool(lab, pools, shared),
+		T.check(!StorageOverview.diskNamesUnlistedPool(lab, pools, shared, caches),
 				"lab: every used_by is listed");
 		T.check(StorageOverview.diskNamesUnlistedPool(
-				Arrays.asList("reuse_1", "reuse_2"), pools, shared),
+				Arrays.asList("reuse_1", "reuse_2"), pools, shared, caches),
 				"reuse_2 left storagePools: dangling");
 		T.check(!StorageOverview.diskNamesUnlistedPool(
-				Arrays.asList("reuse_1", "", null), pools, shared),
+				Arrays.asList("reuse_1", "", null), pools, shared, caches),
 				"unused and unknown used_by name nothing");
 		T.check(StorageOverview.diskNamesUnlistedPool(
-				Arrays.asList("shared_cache_1"), pools, null),
+				Arrays.asList("shared_cache_1"), pools, null, caches),
 				"sharedCaches not a list: cache disk is unknown, fails safe");
-		T.check(!StorageOverview.diskNamesUnlistedPool(null, pools, shared), "no disks");
+		T.check(!StorageOverview.diskNamesUnlistedPool(null, pools, shared, caches), "no disks");
+		// Review R5-N4: a hot spare (DSM's isHotspare value) and a disk in a
+		// listed non-shared SSD cache name no pool.
+		T.check(!StorageOverview.diskNamesUnlistedPool(
+				Arrays.asList("reuse_1", "hotspare"), pools, shared, caches),
+				"hot spare names no pool");
+		T.check(!StorageOverview.diskNamesUnlistedPool(
+				Arrays.asList("reuse_1", "ssd_1", "ssd_1"), pools, shared,
+				Arrays.asList("ssd_1")), "disk in listed single SSD cache");
+		T.check(StorageOverview.diskNamesUnlistedPool(
+				Arrays.asList("reuse_1", "ssd_2"), pools, shared,
+				Arrays.asList("ssd_1")), "unlisted SSD cache still fails safe");
+		T.check(StorageOverview.diskNamesUnlistedPool(
+				Arrays.asList("ssd_1"), pools, shared, null),
+				"ssdCaches unread: cache disk is unknown, fails safe");
+		T.check(StorageOverview.diskNamesUnlistedPool(
+				Arrays.asList("HotSpare"), pools, shared, caches),
+				"only DSM's exact hotspare value");
+	}
+
+	/**
+	 * Review R5-N3: storage_panel.js showRepairSysPartition. The lab sends
+	 * system_crashed, system_need_repair and system_rebuilding false and no
+	 * rootbackup keys.
+	 */
+	static void systemPartitionRepairFollowsTheUi() {
+		T.eq("false", StorageOverview.systemPartitionNeedsRepair(
+				"false", null, "false", "false", null, "normal"), "lab");
+		T.eq("true", StorageOverview.systemPartitionNeedsRepair(
+				"true", null, "false", "false", null, "normal"), "needs repair");
+		T.eq("true", StorageOverview.systemPartitionNeedsRepair(
+				"false", "true", "false", "false", "false", "normal"),
+				"root backup needs repair");
+		T.eq("true", StorageOverview.systemPartitionNeedsRepair(
+				null, "true", null, null, null, null),
+				"root backup only, nothing suppresses");
+		T.eq("true", StorageOverview.systemPartitionNeedsRepair(
+				"true", null, null, null, null, "attention"),
+				"Warning level does not suppress");
+		T.eq("false", StorageOverview.systemPartitionNeedsRepair(
+				"true", null, "true", "false", null, "normal"), "crashed suppresses");
+		T.eq("false", StorageOverview.systemPartitionNeedsRepair(
+				"true", null, "false", "true", null, "normal"), "rebuilding suppresses");
+		T.eq("false", StorageOverview.systemPartitionNeedsRepair(
+				"true", null, "false", "false", "true", "normal"),
+				"root backup rebuilding suppresses");
+		T.eq("false", StorageOverview.systemPartitionNeedsRepair(
+				"true", "true", "false", "false", null, "danger"),
+				"Critical storage level suppresses");
+		T.eq(null, StorageOverview.systemPartitionNeedsRepair(
+				null, null, "false", "false", null, "normal"), "absent: skipped");
+		T.eq(null, StorageOverview.systemPartitionNeedsRepair(
+				"1", "false", "false", "false", null, "normal"),
+				"system_need_repair not a boolean: skipped, never false");
 	}
 }

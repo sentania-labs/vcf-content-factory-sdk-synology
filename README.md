@@ -28,7 +28,7 @@ Synology storage health.
 
 The pak installs these alerts (build 35, issue #35), each with its
 symptoms and a recommendation. Pak content is enabled in the default
-policy, so all seven are on after install; turn one off in the policy
+policy, so all nine are on after install; turn one off in the policy
 like any other alert. Each condition holds for 3 collection cycles before
 the symptom triggers and 3 before it cancels.
 
@@ -41,6 +41,8 @@ the symptom triggers and 3 before it cancels.
 | SSD Cache Failure | SSD Cache | `Hardware\|disk_failure_count` not 0, or `Configuration\|status` a DSM failure value (`degrade`, `crashed`, `deverr`, `ro`) | Critical | yes |
 | Fan Failure | DiskStation | `Fan\|fan_health` is `failed` (DSM System Health reports a fan failure) | Critical | yes |
 | UPS On Battery | UPS | `Status\|status` is `usb_ups_status_battery` / `usb_ups_status_low_batt` | Warning / Critical | yes |
+| Storage Degraded | DiskStation | DSM Storage Manager's storage verdict is Critical / Warning (`Health\|storage_status` `danger` / `attention`), a pool is missing (`Health\|missing_pools` not 0) / awaiting assembly (`Health\|detected_pools` not 0), or the system partition crashed (`Health\|system_partition_crashed` `true`) / needs repair (`Health\|system_partition_needs_repair` `true`) | Critical / Warning, per symptom | yes |
+| Expansion Unit Lost | DiskStation | DSM reports space affected by a lost expansion unit (`Health\|expansion_unit_lost` `true`) **and** the storage verdict is Critical (`Health\|storage_status` `danger`), or an incompatible expansion unit (`Health\|incompatible_expansion_units` not 0) | Critical / Warning | yes |
 
 A status the adapter could not read is not published, so no alert fires
 on a missing value; a disk whose SMART DSM cannot read (`unknown`) raises
@@ -53,7 +55,14 @@ DSM's `pool_crashed` and `pool_error`, because DSM keeps those in a
 different field (`space_status.status`) that the adapter does not read,
 so they never appear in `Configuration|status`; the UPS values come from DSM's own UI code
 and have not yet been seen on a live UPS; the uncorrectable-sector
-symptom needs a few days of history before its dynamic threshold exists.
+symptom needs a few days of history before its dynamic threshold exists;
+Storage Degraded and Expansion Unit Lost read DSM Storage Manager's own
+health card (`SYNO.Storage.CGI.Storage load_info`, matched the way DSM's
+`storage_panel.js` reads it) and have not been seen degraded live (the
+lab NAS has no failed pool or expansion unit). Expansion Unit Lost needs
+Storage Critical too, because DSM's UI shows nothing on the lost-unit flag
+alone; a degraded storage verdict also raises Storage Degraded, so the two
+can be open together.
 The status conditions are regular expressions over DSM's own failure
 values; exact patterns and the symptom names are in
 [REFERENCE.md, Bundled alerts](REFERENCE.md#bundled-alerts).
@@ -188,7 +197,8 @@ lost or incompatible expansion unit, deletes nothing. The missing pool's own
 object keeps the last status DSM gave while it was listed; the DiskStation
 shows the problem instead, through `Health|missing_pools`,
 `Health|storage_status` (DSM Storage Manager's own Healthy, Warning or
-Critical) and `Health|expansion_unit_lost`.
+Critical) and `Health|expansion_unit_lost`, which raise the Storage
+Degraded and Expansion Unit Lost alerts.
 Details: REFERENCE.md, Removed objects. The framework's
 own warning is in the factory's buildkit release notes
 (`.github/release-notes-buildkit.md`, Behavior since 1.0.22, "On first

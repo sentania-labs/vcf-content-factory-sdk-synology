@@ -80,7 +80,7 @@ def enumeration():
     # Review R4-W1: a disk naming an unlisted pool, and the expansion-unit
     # flags, present-only, from this load_info.
     assert ("read.disksNameUnlistedPool(StorageOverview.diskNamesUnlistedPool(\n"
-            "\t\t\t\tdiskUsedBy, poolIds, sharedCacheIds));") in enum
+            "\t\t\t\tdiskUsedBy, poolIds, sharedCacheIds, cacheIds));") in enum
     assert 'SimpleJson overview = storage.data().get("overview_data");' in enum
     assert ("StorageOverview.eunitLost(!eunitLost.isNull(), eunitLost.asString()),"
             in enum)

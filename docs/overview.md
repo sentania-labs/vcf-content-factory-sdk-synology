@@ -210,10 +210,15 @@ normally — collection is never failed over the optional cross-link.
 
 ## Bundled Alerts
 
-Build 35 ships seven alerts with their symptoms and recommendations, all
+Build 35 ships nine alerts with their symptoms and recommendations, all
 enabled by default: Storage Pool Not Healthy, Volume Not Healthy, Volume
-Nearly Full, Disk Failing, SSD Cache Failure, Fan Failure and UPS On
-Battery. Conditions, severities and the DSM values they match:
+Nearly Full, Disk Failing, SSD Cache Failure, Fan Failure, UPS On
+Battery, Storage Degraded and Expansion Unit Lost. The last two are on the
+DiskStation and read DSM Storage Manager's own health card: a Critical or
+Warning storage verdict, a missing pool or one awaiting assembly, a crashed
+system partition or one that needs repair, a lost expansion unit (with a
+Critical verdict, as DSM shows it) or an incompatible one; none has been
+seen degraded live. Conditions, severities and the DSM values they match:
 [REFERENCE.md, Bundled alerts](../REFERENCE.md#bundled-alerts). Fan health
 comes from DSM's System Health, which reports only its top problem, so a
 fan failure is hidden while another problem outranks it, and a Fan

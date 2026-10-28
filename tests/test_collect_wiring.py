@@ -140,18 +140,35 @@ def main():
     # present-only, from load_info (always read), published once.
     for key, src in (
             ("Health|storage_status_level", "SynologyMetrics.text(SJ, statusLevel)"),
-            ("Health|storage_status", "StorageOverview.level("),
+            ("Health|storage_status", "storageLevel);"),
             ("Health|expansion_unit_lost", "StorageOverview.flag("),
             ("Health|incompatible_expansion_units", "StorageOverview.count(incompatible.isList(), incompatible.size())"),
             ("Health|missing_pools", "StorageOverview.count(missingPools.isList(), missingPools.size())"),
             ("Health|detected_pools", "StorageOverview.count(detectedPools.isList(), detectedPools.size())"),
             ("Health|system_partition_crashed", "StorageOverview.flag("),
-            ("Health|system_partition_needs_repair", "StorageOverview.flag(")):
+            ("Health|system_partition_needs_repair",
+             "StorageOverview.systemPartitionNeedsRepair(")):
         m = re.search(r'propIfPresent\(out, "' + re.escape(key) + r'",\s*' + re.escape(src), ds)
         assert m, f"{key} is not present-only from {src}"
         assert ADAPTER.count('"' + key + '"') == 1, f"{key} published elsewhere too"
     assert 'overview.get("space_affect_by_eunit_lost").asString()' in ds
-    assert 'storageData.get("env").get("status")' in ds
+    assert 'SimpleJson sysStatus = storageData.get("env").get("status");' in ds
+    # Review R5-N2: the env.status key names, as DSM sends them (lab probe
+    # and storage_panel.js); a typo would silently drop both properties.
+    assert re.search(r'propIfPresent\(out, "Health\|system_partition_crashed", '
+                     r'StorageOverview\.flag\(\s*sysStatus\.get\("system_crashed"\)'
+                     r'\.asString\(\)\)\);', ds), "system_crashed key"
+    assert re.search(
+        r'StorageOverview\.systemPartitionNeedsRepair\(\s*'
+        r'sysStatus\.get\("system_need_repair"\)\.asString\(\),\s*'
+        r'sysStatus\.get\("rootbackup_need_repair"\)\.asString\(\),\s*'
+        r'sysStatus\.get\("system_crashed"\)\.asString\(\),\s*'
+        r'sysStatus\.get\("system_rebuilding"\)\.asString\(\),\s*'
+        r'sysStatus\.get\("rootbackup_rebuilding"\)\.asString\(\),\s*'
+        r'storageLevel\)\);', ds), "system partition repair keys"
+    assert re.search(r'String storageLevel = StorageOverview\.level\(statusLevel\.asString\(\),'
+                     r'\s*levelNames\(overview\.get\("sample_level_str"\)\)\);', ds)
+    assert 'propIfPresent(out, "Health|storage_status", storageLevel);' in ds
     assert 'levelNames(overview.get("sample_level_str"))' in ds
     describe = (ROOT / "describe.xml").read_text()
     for key in ("storage_status", "storage_status_level", "expansion_unit_lost",

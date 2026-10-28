@@ -565,7 +565,8 @@ public final class ReadKindsTest {
 		ReadKinds r = complete();
 		r.disksNameUnlistedPool(StorageOverview.diskNamesUnlistedPool(
 				Arrays.asList("reuse_1", "reuse_2", "reuse_2"),
-				Arrays.asList("reuse_1"), Arrays.asList("shared_cache_1")));
+				Arrays.asList("reuse_1"), Arrays.asList("shared_cache_1"),
+				Arrays.asList("alloc_cache_1_1")));
 		assertOnlyOut(r.kinds(), set(ReadKinds.POOL), "disk names reuse_2");
 		Map<String, String> known = new HashMap<>();
 		known.put("pool:reuse_1", ReadKinds.POOL);

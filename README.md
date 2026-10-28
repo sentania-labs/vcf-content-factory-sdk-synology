@@ -34,11 +34,11 @@ the symptom triggers and 3 before it cancels.
 
 | Alert | Object | Condition | Severity | On by default |
 |---|---|---|---|---|
-| Storage Pool Not Healthy | Storage Pool | `Configuration\|status` is a DSM failure value (degraded, crashed, error) | Critical | yes |
-| Volume Not Healthy | Volume | `Configuration\|status` is a DSM failure value (degraded, crashed, error, read-only) | Critical | yes |
+| Storage Pool Not Healthy | Storage Pool | `Configuration\|status` is a DSM failure value (`degrade`, `crashed`, `deverr`, `pool_crashed`, `pool_error`) | Critical | yes |
+| Volume Not Healthy | Volume | `Configuration\|status` is a DSM failure value (`degrade`, `crashed`, `deverr`, `ro`, `pool_crashed`, `pool_error`) | Critical | yes |
 | Volume Nearly Full | Volume | `Capacity\|usage_pct` at or above 85 % / 95 % | Warning / Critical | yes |
 | Disk Failing | Disk | `Health\|smart_status` is `failing`, `degraded` or `access_err` / `Health\|unc_sectors` above its dynamic threshold | Critical / Warning | yes |
-| SSD Cache Failure | SSD Cache | `Hardware\|disk_failure_count` not 0, or `Configuration\|status` a DSM failure value | Critical | yes |
+| SSD Cache Failure | SSD Cache | `Hardware\|disk_failure_count` not 0, or `Configuration\|status` a DSM failure value (`degrade`, `crashed`, `deverr`, `ro`) | Critical | yes |
 | Fan Failure | DiskStation | `Fan\|fan_health` is `failed` (DSM System Health reports a fan failure) | Critical | yes |
 | UPS On Battery | UPS | `Status\|status` is `usb_ups_status_battery` / `usb_ups_status_low_batt` | Warning / Critical | yes |
 
@@ -49,6 +49,9 @@ problem, so a fan failure is not visible (fan health `unknown`) while
 another problem outranks it; the UPS values come from DSM's own UI code
 and have not yet been seen on a live UPS; the uncorrectable-sector
 symptom needs a few days of history before its dynamic threshold exists.
+The status conditions are regular expressions over DSM's own failure
+values; exact patterns and the symptom names are in
+[REFERENCE.md, Bundled alerts](REFERENCE.md#bundled-alerts).
 
 ## Prerequisites
 

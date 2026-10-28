@@ -445,17 +445,20 @@ synology_diskstation
 Build 35 (issue #35). All seven are enabled in the default policy after
 install. Every symptom waits 3 cycles to trigger and 3 to cancel. A status
 the adapter could not read is not published, so no symptom fires on a
-missing value.
+missing value. Symptom and alert names carry the `[VCF Content Factory]
+Synology` prefix in VCF Operations; the table drops it. The status
+symptoms use the REGEX operator, so only the DSM values listed below
+raise them.
 
-| Alert | Object | Symptom condition | Severity | On by default |
-|---|---|---|---|---|
-| Storage Pool Not Healthy | Storage Pool | `Configuration\|status` matches `^(degrade\|crashed\|deverr\|pool_crashed\|pool_error)$` | Critical | yes |
-| Volume Not Healthy | Volume | `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro\|pool_crashed\|pool_error)$` | Critical | yes |
-| Volume Nearly Full | Volume | `Capacity\|usage_pct` >= 85 / >= 95 | Warning / Critical | yes |
-| Disk Failing | Disk | `Health\|smart_status` matches `^(failing\|degraded\|access_err)$` / `Health\|unc_sectors` above its dynamic threshold | Critical / Warning | yes |
-| SSD Cache Failure | SSD Cache | `Hardware\|disk_failure_count` != `0` / `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro)$` | Critical | yes |
-| Fan Failure | DiskStation | `Fan\|fan_health` = `failed` | Critical | yes |
-| UPS On Battery | UPS | `Status\|status` = `usb_ups_status_battery` / = `usb_ups_status_low_batt` | Warning / Critical | yes |
+| Alert | Object | Symptoms | Symptom condition | Severity | On by default |
+|---|---|---|---|---|---|
+| Storage Pool Not Healthy | Storage Pool | Storage Pool Failed | `Configuration\|status` matches `^(degrade\|crashed\|deverr\|pool_crashed\|pool_error)$` | Critical | yes |
+| Volume Not Healthy | Volume | Volume Failed | `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro\|pool_crashed\|pool_error)$` | Critical | yes |
+| Volume Nearly Full | Volume | Volume Usage Warning / Volume Usage Critical | `Capacity\|usage_pct` >= 85 / >= 95 | Warning / Critical | yes |
+| Disk Failing | Disk | Disk SMART Failing / Disk Uncorrectable Sectors Increasing | `Health\|smart_status` matches `^(failing\|degraded\|access_err)$` / `Health\|unc_sectors` above its dynamic threshold | Critical / Warning | yes |
+| SSD Cache Failure | SSD Cache | SSD Cache Disk Failure / SSD Cache Failed | `Hardware\|disk_failure_count` != `0` / `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro)$` | Critical | yes |
+| Fan Failure | DiskStation | Fan Failed | `Fan\|fan_health` = `failed` | Critical | yes |
+| UPS On Battery | UPS | UPS On Battery / UPS Low Battery | `Status\|status` = `usb_ups_status_battery` / = `usb_ups_status_low_batt` | Warning / Critical | yes |
 
 Value sources (DSM 7.3.2 UI code on the lab DS1520+, 2026-10-28): pool and
 volume status keys are DSM's `volume_status_*` string table (`degrade`

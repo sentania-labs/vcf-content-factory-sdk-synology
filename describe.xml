@@ -111,6 +111,13 @@
 			<ResourceGroup key="Fan" nameKey="60" instanced="false">
 				<ResourceAttribute key="fan_status" nameKey="61" dataType="string" isProperty="true"/>
 				<ResourceAttribute key="fan_speed_mode" nameKey="62" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="fan_health" nameKey="63" dataType="string" isProperty="true"/>
+			</ResourceGroup>
+
+			<ResourceGroup key="Health" nameKey="142" instanced="false">
+				<ResourceAttribute key="system_health" nameKey="320" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="system_health_rule" nameKey="321" dataType="string" isProperty="true"/>
+				<ResourceAttribute key="system_health_message" nameKey="322" dataType="string" isProperty="true"/>
 			</ResourceGroup>
 
 			<ResourceGroup key="NFS" nameKey="70" instanced="false">

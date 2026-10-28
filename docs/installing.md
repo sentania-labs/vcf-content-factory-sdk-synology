@@ -86,6 +86,7 @@ unread, and the framework logs its own line for each of them:
 | `SYNO.Core.Share` | NFS export objects (existing ones go ERROR), their Volume and Datastore relationships |
 | `SYNO.Core.FileServ.NFS.SharePrivilege` (per share) | that share's NFS rules: an existing NFS export on it goes ERROR (no `rule_count` or `allowed_clients` is published), the relationships of the Volume that share sits on are left unchanged (other Volumes still refresh), and a share not yet known as an export is not discovered until its probe succeeds |
 | `SYNO.Core.ExternalDevice.UPS` | the UPS object |
+| `SYNO.Core.System.SystemHealth` (build 35) | DiskStation `Health\|system_health*` and `Fan\|fan_health` properties (the Fan Failure alert cannot fire) |
 
 The UPS read keeps its build 30 logging: an INFO each cycle. The
 per-share NFS rule probe (build 32) runs only while the NFS service is
@@ -233,10 +234,15 @@ path's HTTPS requirement.
 
 ## Step-by-Step Installation
 
-1. Install the `.pak` file via **Data Sources > Integrations > Repository > Add**
-   (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**).
-2. After installation, navigate to **Data Sources > Integrations > Accounts**
-   (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**).
+1. Install the `.pak` file from the **Repository** tab of Integrations,
+   **Add**: on 9.1.1, **Operate** tab > **Administration** >
+   **Integrations** > **Repository**; on 9.0.2 and 8.18.7,
+   **Administration** > **Integrations** > **Repository** (verified
+   2026-10-28).
+2. After installation, open the **Accounts** tab of Integrations (the
+   default tab): on 9.1.1, **Operate** tab > **Administration** >
+   **Integrations** > **Accounts**; on 9.0.2 and 8.18.7,
+   **Administration** > **Integrations** > **Accounts**.
 3. Click **Add Account** and select **VCF Content Factory Synology DiskStation**.
 4. Fill in the configuration fields above (host, port `5001`, DSM
    credentials; leave `allowInsecure` at `false`).

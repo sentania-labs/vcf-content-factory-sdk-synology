@@ -60,6 +60,7 @@ final class DsmApis {
 		m.put(SnapshotReads.NICS, 1);
 		m.put(SnapshotReads.CONNECTIONS, 1);
 		m.put(SnapshotReads.SHARES, 1);
+		m.put(SnapshotReads.SYSTEM_HEALTH, 1);
 		m.put(NFS_PRIVILEGE, 1);
 		m.put(UPS, 1);
 		DESIRED = Collections.unmodifiableMap(m);

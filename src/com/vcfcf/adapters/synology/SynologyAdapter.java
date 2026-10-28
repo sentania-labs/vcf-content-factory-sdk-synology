@@ -918,6 +918,25 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				System.currentTimeMillis(), value != null ? value : ""));
 	}
 
+	/**
+	 * Build 35 (review W1): publishes {@code value} unless it is {@code null}
+	 * (DSM did not send the field, or sent it blank), so a status that was
+	 * not read is never published as {@code ""}, which a "not normal"
+	 * symptom would read as a fault. Ops keeps the last value it had.
+	 */
+	private static void propIfPresent(List<MetricData> out, String key,
+			String value) {
+		if (value != null) {
+			prop(out, key, value);
+		}
+	}
+
+	/** Build 35 (review W1): DSM's text field, present-only; see {@link #propIfPresent}. */
+	private static void textIfPresent(List<MetricData> out, String key,
+			SimpleJson node) {
+		propIfPresent(out, key, SynologyMetrics.text(SJ, node));
+	}
+
 	// -----------------------------------------------------------------------
 	// Per-kind collectors (value semantics preserved from v1)
 	// -----------------------------------------------------------------------
@@ -990,8 +1009,22 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 
 		if (s.isRead(SnapshotReads.FAN)) {
+			// Build 35 (review B2): cool_fan is which fan speed modes the
+			// model offers ("no", "single", "yes"), not fan health; key kept,
+			// display name now "Fan Mode Support". Fan health is Fan|fan_health.
 			prop(out, "Fan|fan_status", fan.data().get("cool_fan").asString("unknown"));
 			prop(out, "Fan|fan_speed_mode", fan.data().get("dual_fan_speed").asString("unknown"));
+		}
+
+		// Build 35 (review B2): DSM's System Health widget verdict and the fan
+		// health derived from it; each key skipped when DSM did not send it.
+		// See SystemHealth.
+		if (s.isRead(SnapshotReads.SYSTEM_HEALTH)) {
+			SimpleJson rule = s.systemHealth.data().get("rule");
+			propIfPresent(out, "Health|system_health", SystemHealth.level(SJ, rule));
+			propIfPresent(out, "Health|system_health_rule", SystemHealth.ruleId(SJ, rule));
+			propIfPresent(out, "Health|system_health_message", SystemHealth.message(SJ, rule));
+			propIfPresent(out, "Fan|fan_health", SystemHealth.fanHealth(SJ, rule));
 		}
 
 		if (s.isRead(SnapshotReads.NFS_SERVICE)) {
@@ -1041,7 +1074,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		metricIfPresent(out, "Capacity|usage_pct", cap.usagePct);
 
 		prop(out, "Configuration|raid_type", pool.get("raidType").asString(""));
-		prop(out, "Configuration|status", pool.get("status").asString(""));
+		textIfPresent(out, "Configuration|status", pool.get("status"));
 		prop(out, "Configuration|pool_path", pool.get("pool_path").asString(""));
 		prop(out, "Configuration|device_type", pool.get("device_type").asString(""));
 
@@ -1070,7 +1103,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 		prop(out, "Configuration|volume_path", volPath);
 		prop(out, "Configuration|fs_type", vol.get("fs_type").asString(""));
-		prop(out, "Configuration|status", vol.get("status").asString(""));
+		textIfPresent(out, "Configuration|status", vol.get("status"));
 		prop(out, "Configuration|description", vol.get("deploy_path").asString(""));
 
 		// Volume IO from Utilization (keyed by vol_path stripped of leading /)
@@ -1090,7 +1123,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson cache = SynologyTopology.cacheForVolume(SJ, vol, s.storage);
 		if (cache != null) {
 			prop(out, "Cache|cache_enabled", "true");
-			prop(out, "Cache|cache_status", cache.get("status").asString(""));
+			textIfPresent(out, "Cache|cache_status", cache.get("status"));
 			// Peer review: published only when DSM sent them.
 			metricIfPresent(out, "Cache|cache_read_hit_rate",
 					SynologyMetrics.num(SJ, cache.get("hit_rate")));
@@ -1120,7 +1153,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		prop(out, "Hardware|size_bytes", disk.get("size_total").asString("0"));
 
 		metric(out, "Health|temperature", disk.get("temp").asDouble());
-		prop(out, "Health|smart_status", disk.get("smart_status").asString(""));
+		// Build 35 (review W1): present-only. DSM's "unknown" (SMART not
+		// readable; Storage Manager treats it like a disconnected drive) is
+		// published as sent; the bundled symptom matches failure values only.
+		textIfPresent(out, "Health|smart_status", disk.get("smart_status"));
 		metric(out, "Health|unc_sectors", disk.get("unc").asDouble());
 		// Build 32 (issue #34): remain_life is {trustable, value}; -1 (HDD)
 		// and untrusted values are not published. See SynologyMetrics.
@@ -1157,7 +1193,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		metric(out, "Capacity|memory_used", cache.get("memory").asDouble());
 
 		prop(out, "Configuration|mode", cache.get("mode").asString(""));
-		prop(out, "Configuration|status", cache.get("status").asString(""));
+		textIfPresent(out, "Configuration|status", cache.get("status"));
 		prop(out, "Configuration|mount_volume", cache.get("mountSpaceId").asString(""));
 		prop(out, "Configuration|device_type", cache.get("device_type").asString(""));
 		prop(out, "Configuration|skip_seq_io",
@@ -1292,7 +1328,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		boolean connected = ups.data().get("usb_ups_connect").asBoolean();
 		metric(out, "Battery|charge_pct", ups.data().get("charge").asDouble());
 		metric(out, "Battery|runtime_seconds", ups.data().get("runtime").asDouble());
-		prop(out, "Status|status", ups.data().get("status").asString(""));
+		// Build 35 (review B1, W1): DSM's usb_ups_status_* key, present-only.
+		textIfPresent(out, "Status|status", ups.data().get("status"));
 		prop(out, "Status|mode", ups.data().get("mode").asString(""));
 		prop(out, "Status|connected", connected ? "true" : "false");
 	}
@@ -1570,6 +1607,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson networkInterfaces;
 		SimpleJson connections;
 		SimpleJson shares;
+		SimpleJson systemHealth;
 		SimpleJson ups; // nullable: UPS optional
 		/**
 		 * Build 34 (issue #11): this cycle's DiskStation identity, resolved
@@ -1650,6 +1688,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			s.networkInterfaces = r.networkInterfaces;
 			s.connections = r.connections;
 			s.shares = r.shares;
+			s.systemHealth = r.systemHealth;
 			s.unread = r.unread;
 
 			// NIT-1 (build-15): contract-assert one required field on the two

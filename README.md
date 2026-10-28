@@ -11,7 +11,7 @@ Full docset (overview, installing & configuring, inventory tree): [`docs/README.
 | Object | Metrics | Properties |
 |---|---|---|
 | **Synology World** | Aggregation root, one per DiskStation (build 34) | — |
-| **DiskStation** | CPU, load averages, memory, network, temperature, uptime, NFS ops/latency | Model, hostname, firmware, fan status |
+| **DiskStation** | CPU, load averages, memory, network, temperature, uptime, NFS ops/latency | Model, hostname, firmware, DSM system health, fan health, fan mode |
 | **Storage Pool** | Capacity (total, allocated, allocated %) | RAID type, status, disk count |
 | **Volume** | Capacity, IO (read/write throughput, IOPS, utilization), SSD cache hit rates | Filesystem type, status, volume path |
 | **Disk** | Temperature, SMART health, IO (read/write throughput, IOPS, utilization), remaining life | Model, firmware, serial, vendor, disk type, drive family, slot ID, capacity |
@@ -23,6 +23,32 @@ Full docset (overview, installing & configuring, inventory tree): [`docs/README.
 **Cross-adapter stitching**: iSCSI LUNs and NFS exports are linked to VMWARE Datastores
 via NAA transform and NFS export path matching. Clicking a Datastore shows the backing
 Synology storage health.
+
+## Bundled alerts
+
+The pak installs these alerts (build 35, issue #35), each with its
+symptoms and a recommendation. Pak content is enabled in the default
+policy, so all seven are on after install; turn one off in the policy
+like any other alert. Each condition holds for 3 collection cycles before
+the symptom triggers and 3 before it cancels.
+
+| Alert | Object | Condition | Severity | On by default |
+|---|---|---|---|---|
+| Storage Pool Not Healthy | Storage Pool | `Configuration\|status` is a DSM failure value (degraded, crashed, error) | Critical | yes |
+| Volume Not Healthy | Volume | `Configuration\|status` is a DSM failure value (degraded, crashed, error, read-only) | Critical | yes |
+| Volume Nearly Full | Volume | `Capacity\|usage_pct` at or above 85 % / 95 % | Warning / Critical | yes |
+| Disk Failing | Disk | `Health\|smart_status` is `failing`, `degraded` or `access_err` / `Health\|unc_sectors` above its dynamic threshold | Critical / Warning | yes |
+| SSD Cache Failure | SSD Cache | `Hardware\|disk_failure_count` not 0, or `Configuration\|status` a DSM failure value | Critical | yes |
+| Fan Failure | DiskStation | `Fan\|fan_health` is `failed` (DSM System Health reports a fan failure) | Critical | yes |
+| UPS On Battery | UPS | `Status\|status` is `usb_ups_status_battery` / `usb_ups_status_low_batt` | Warning / Critical | yes |
+
+A status the adapter could not read is not published, so no alert fires
+on a missing value; a disk whose SMART DSM cannot read (`unknown`) raises
+nothing. Limits: DSM's System Health reports only its highest-ranked
+problem, so a fan failure is not visible (fan health `unknown`) while
+another problem outranks it; the UPS values come from DSM's own UI code
+and have not yet been seen on a live UPS; the uncorrectable-sector
+symptom needs a few days of history before its dynamic threshold exists.
 
 ## Prerequisites
 
@@ -41,8 +67,8 @@ must be on for each install or upgrade of an unsigned pak:
 2. Administrator Settings, Security Settings: click **Activate Unsigned PAK
    Installation** on 9.1 (**Enable Unsigned PAK Installation** on 9.0). The
    change is refused while any cluster node is down.
-3. When uploading the pak (**Data Sources > Integrations > Repository >
-   Add** on 9.1; **Administration > Solutions** on 8.x), tick **Ignore the
+3. When uploading the pak (**Repository** tab > **Add**, see Install
+   below for where the tab is on your version), tick **Ignore the
    PAK file signature checking**. The box only appears once the setting is
    on.
 
@@ -55,7 +81,7 @@ keep whatever state the setting had before the upgrade.
 
 ## Install
 
-1. Open VCF Operations and go to **Data Sources > Integrations > Repository** (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**)
+1. Open VCF Operations and go to the **Repository** tab of Integrations: on 9.1.1, **Operate** tab > **Administration** > **Integrations** > **Repository**; on 9.0.2 and 8.18.7, **Administration** > **Integrations** > **Repository** (verified 2026-10-28)
 2. Click **Add**
 3. Select the `.pak` file from this package
 4. Accept the EULA and wait for installation to complete (~30 seconds)
@@ -64,7 +90,7 @@ keep whatever state the setting had before the upgrade.
 
 After installation, create an adapter instance:
 
-1. Go to **Data Sources > Integrations > Accounts** (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**)
+1. Go to the **Accounts** tab of Integrations (the default tab): on 9.1.1, **Operate** tab > **Administration** > **Integrations** > **Accounts**; on 9.0.2 and 8.18.7, **Administration** > **Integrations** > **Accounts** (verified 2026-10-28)
 2. Click **Add Account** and select **VCF Content Factory Synology DiskStation**
 3. Fill in:
    - **Host / IP Address**: Your NAS hostname or IP (e.g., `storage.example.com`)
@@ -90,6 +116,28 @@ milliseconds. Charts spanning the upgrade show a step down, and any
 symptom, view or super metric threshold on these keys needs re-checking.
 Key names and units are unchanged. NFS max latency is now skipped, not
 published as 0, when DSM does not send it.
+
+Dynamic thresholds and anomaly history on `IO|read_latency`,
+`IO|write_latency` and `NFS|nfs_max_latency` were learned on values 1000
+times too large. VCF Operations relearns them from the new data, so expect
+spurious anomalies on these keys until it has a few days of history at the
+new scale.
+
+Build 35 also adds the bundled alerts (section Bundled alerts). The Disk
+Failing alert's uncorrectable-sector symptom is a dynamic-threshold
+symptom: on a fresh install, or on an upgrade to this build, it has no
+band yet and cannot fire until VCF Operations has learned one (a few
+days); the SMART half of the alert works from the first cycle.
+
+`Fan|fan_status` keeps its key and value (DSM's `cool_fan`) but is now
+labelled "Fan Mode Support": it says which fan speed modes the model
+offers, not whether a fan works. Fan health is the new `Fan|fan_health`,
+from DSM's System Health (`SYNO.Core.System.SystemHealth`), shown with the
+new `Health|system_health`, `system_health_rule` and
+`system_health_message` properties. A view or symptom that read
+`fan_status` as health needs re-pointing to `fan_health`. Pool, volume,
+SSD cache, SMART and UPS statuses that DSM does not send are now skipped
+instead of published as an empty value.
 
 ### To build 34 (from 1.0.0.30, 0.0.0.33 or earlier): Synology objects are re-created once
 

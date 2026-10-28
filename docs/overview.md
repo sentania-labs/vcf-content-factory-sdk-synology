@@ -199,6 +199,16 @@ normally — collection is never failed over the optional cross-link.
   Datastore cross-link, is still published. Before build 31 such an object
   threw, and no relationships at all were published, every cycle.
 
+## Bundled Alerts
+
+Build 35 ships seven alerts with their symptoms and recommendations, all
+enabled by default: Storage Pool Not Healthy, Volume Not Healthy, Volume
+Nearly Full, Disk Failing, SSD Cache Failure, Fan Failure and UPS On
+Battery. Conditions, severities and the DSM values they match:
+[REFERENCE.md, Bundled alerts](../REFERENCE.md#bundled-alerts). Fan health
+comes from DSM's System Health, which reports only its top problem, so a
+fan failure is hidden while another problem outranks it.
+
 ## Known Limitations
 
 - **No remediation / control actions.** The pack is read-only monitoring.

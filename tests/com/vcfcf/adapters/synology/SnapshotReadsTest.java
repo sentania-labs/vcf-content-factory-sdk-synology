@@ -27,11 +27,13 @@ public final class SnapshotReadsTest {
 			SnapshotReads.UTILIZATION, SnapshotReads.FAN,
 			SnapshotReads.NFS_SERVICE, SnapshotReads.STORAGE,
 			SnapshotReads.LUNS, SnapshotReads.TARGETS, SnapshotReads.NICS,
-			SnapshotReads.CONNECTIONS, SnapshotReads.SHARES);
+			SnapshotReads.CONNECTIONS, SnapshotReads.SHARES,
+			SnapshotReads.SYSTEM_HEALTH);
 	private static final List<String> OPTIONAL = Arrays.asList(
 			SnapshotReads.FAN, SnapshotReads.NFS_SERVICE, SnapshotReads.LUNS,
 			SnapshotReads.TARGETS, SnapshotReads.NICS,
-			SnapshotReads.CONNECTIONS, SnapshotReads.SHARES);
+			SnapshotReads.CONNECTIONS, SnapshotReads.SHARES,
+			SnapshotReads.SYSTEM_HEALTH);
 
 	/** Fake NAS: each endpoint answers its name, or throws its failure. */
 	static final class FakeNas implements SnapshotReads.Source<String> {
@@ -65,6 +67,7 @@ public final class SnapshotReadsTest {
 		@Override public String networkInterfaceList() throws IOException, InterruptedException { return answer(SnapshotReads.NICS); }
 		@Override public String currentConnections() throws IOException, InterruptedException { return answer(SnapshotReads.CONNECTIONS); }
 		@Override public String shareList() throws IOException, InterruptedException { return answer(SnapshotReads.SHARES); }
+		@Override public String systemHealth() throws IOException, InterruptedException { return answer(SnapshotReads.SYSTEM_HEALTH); }
 	}
 
 	public static void main(String[] args) throws Exception {

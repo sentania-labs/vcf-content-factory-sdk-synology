@@ -9,6 +9,8 @@
 - W3 (issue #17, DEF-001): both callRaw overloads route IOException and
   RuntimeException through SynologyRedaction.transportFailure, and no
   other catch of the HTTP call exists.
+- Build 35 review W1, B2: pool, volume, cache, SMART and UPS statuses are
+  present-only; Fan|fan_health comes from SystemHealth, gated on its read.
 - Round 2 (R13, R14): the Datastore duplicate-row filter runs before the
   count and the index; memory_usage_pct uses SynologyMetrics.memoryUsagePct.
 Stdlib only; run from anywhere (ci/run_java_tests.sh runs it).
@@ -103,6 +105,28 @@ def main():
                          ADAPTER), f"{key} is not published through loadAverage from {field}"
         assert ADAPTER.count(key.split("|", 1)[1] + '"') == 1, \
             f"{key} is published somewhere else too"
+    # Build 35 review W1: the statuses the bundled symptoms read are
+    # present-only (skipped when DSM omits them or sends them blank), never
+    # published as "".
+    for fn, key, field in (
+            (r"private void collectStoragePool\(", "Configuration|status", "pool"),
+            (r"private void collectVolume\(", "Configuration|status", "vol"),
+            (r"private void collectVolume\(", "Cache|cache_status", "cache"),
+            (r"private void collectDisk\(", "Health|smart_status", "disk"),
+            (r"private void collectSsdCache\(", "Configuration|status", "cache"),
+            (r"private void collectUps\(", "Status|status", "ups")):
+        b = body(ADAPTER, fn)
+        assert re.search(r'textIfPresent\(out, "' + re.escape(key) + r'", ', b), \
+            f"{fn}: {key} is not present-only"
+        assert not re.search(r'prop\(out, "' + re.escape(key) + r'"', b), \
+            f"{fn}: {key} is still published with prop()"
+    # Build 35 review B2: fan health comes from DSM's System Health rule,
+    # only when that endpoint was read.
+    ds = body(ADAPTER, r"private void collectDiskstation\(")
+    assert re.search(r'if \(s\.isRead\(SnapshotReads\.SYSTEM_HEALTH\)\)', ds), \
+        "system health is not gated on its read"
+    assert 'propIfPresent(out, "Fan|fan_health", SystemHealth.fanHealth(SJ, rule))' in ds, \
+        "Fan|fan_health is not SystemHealth.fanHealth"
     print("test_collect_wiring: all assertions passed")
 
 

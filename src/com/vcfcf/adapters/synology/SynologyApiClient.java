@@ -255,9 +255,20 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 		return call("SYNO.Core.ISCSI.Target", 1, "list");
 	}
 
-	/** Core.Hardware.FanSpeed: fan status */
+	/**
+	 * Core.Hardware.FanSpeed: the fan speed mode and which modes the model
+	 * offers. Not fan health (build 35, review B2): see {@link #systemHealth}.
+	 */
 	public SimpleJson fanSpeed() throws IOException, InterruptedException {
 		return call("SYNO.Core.Hardware.FanSpeed", 1, "get");
+	}
+
+	/**
+	 * Build 35 (review B2): Core.System.SystemHealth get, DSM's System Health
+	 * widget verdict (the one rule DSM ranks highest); see {@link SystemHealth}.
+	 */
+	public SimpleJson systemHealth() throws IOException, InterruptedException {
+		return call("SYNO.Core.System.SystemHealth", 1, "get");
 	}
 
 	/** Core.Network.Interface list: NIC inventory */

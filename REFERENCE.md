@@ -126,8 +126,33 @@ before the upgrade is 100 times the real load.
 
 | Key | Label | Type | Unit | Monitored |
 |---|---|---|---|---|
-| `fan_status` | Fan Status | property | — | — |
+| `fan_status` | Fan Mode Support | property | — | — |
 | `fan_speed_mode` | Fan Speed Mode | property | — | — |
+| `fan_health` | Fan Health | property | — | — |
+
+`fan_status` is DSM's `cool_fan`: which fan speed modes the model offers
+(`no`, `single`, `yes`), not fan health (display name "Fan Status" before
+build 35). `fan_health` (build 35) is `failed` when DSM's System Health
+reports a fan failure (`widget:fan_fail`, `cpu_fan_fail`,
+`eunit_fan_fail`), `normal` when DSM reports the system healthy, and
+`unknown` when another problem outranks the fans (DSM's System Health
+returns only its top problem); it is skipped when
+`SYNO.Core.System.SystemHealth` was not read.
+
+#### Health
+
+| Key | Label | Type | Unit | Monitored |
+|---|---|---|---|---|
+| `system_health` | System Health | property | — | — |
+| `system_health_rule` | System Health Rule | property | — | — |
+| `system_health_message` | System Health Message | property | — | — |
+
+Build 35: DSM's System Health widget verdict (`SYNO.Core.System.SystemHealth`).
+`system_health` is `normal`, `attention` or `danger` (DSM rule type 2, 1,
+0); `system_health_rule` is DSM's rule id (`system_health`,
+`ups_status_abnormal`, `disk_health_status_error`, ...);
+`system_health_message` is the DSM string-table key of the message
+(`widget:system_ok` when healthy). Each is skipped when DSM did not send it.
 
 #### NFS Service
 
@@ -414,3 +439,38 @@ synology_diskstation
             │   └── Synology Disk
             └── Synology UPS
 ```
+
+## Bundled alerts
+
+Build 35 (issue #35). All seven are enabled in the default policy after
+install. Every symptom waits 3 cycles to trigger and 3 to cancel. A status
+the adapter could not read is not published, so no symptom fires on a
+missing value.
+
+| Alert | Object | Symptom condition | Severity | On by default |
+|---|---|---|---|---|
+| Storage Pool Not Healthy | Storage Pool | `Configuration\|status` matches `^(degrade\|crashed\|deverr\|pool_crashed\|pool_error)$` | Critical | yes |
+| Volume Not Healthy | Volume | `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro\|pool_crashed\|pool_error)$` | Critical | yes |
+| Volume Nearly Full | Volume | `Capacity\|usage_pct` >= 85 / >= 95 | Warning / Critical | yes |
+| Disk Failing | Disk | `Health\|smart_status` matches `^(failing\|degraded\|access_err)$` / `Health\|unc_sectors` above its dynamic threshold | Critical / Warning | yes |
+| SSD Cache Failure | SSD Cache | `Hardware\|disk_failure_count` != `0` / `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro)$` | Critical | yes |
+| Fan Failure | DiskStation | `Fan\|fan_health` = `failed` | Critical | yes |
+| UPS On Battery | UPS | `Status\|status` = `usb_ups_status_battery` / = `usb_ups_status_low_batt` | Warning / Critical | yes |
+
+Value sources (DSM 7.3.2 UI code on the lab DS1520+, 2026-10-28): pool and
+volume status keys are DSM's `volume_status_*` string table (`degrade`
+Degraded, `crashed` Crashed, `deverr` Unknown Error, `ro` Read Only) plus
+the DSM 7 pool states Storage Manager treats as crashed or potentially
+crashed (`pool_crashed`, `pool_error`). Not failures, so they raise
+nothing: `normal` and the in-progress states (`background`, `repair`,
+`resync`, `raid_sync`, `scrubbing`, `expand`, `expand_fs`, `add_disk`,
+`create`, `creating`, `create_fs`, `delete`, `deleting`, `deactivating`,
+`defrag`, `optimize`, `paritycount`, `running_fsck`,
+`running_btrfs_balance`, `upgrade`, `replace`, `waiting`, `activating`,
+`initializing`). SMART: `normal`; `failing`, `degraded` and `access_err`
+(Storage Manager: "Replace the drive immediately") are failures;
+`unknown` means DSM cannot read the drive's SMART and raises nothing. UPS:
+DSM's `ups` string table (`usb_ups_status_online` Connected,
+`usb_ups_status_battery` On Battery, `usb_ups_status_low_batt` Low
+Battery, `usb_ups_status_off` Off; `usb_ups_status_unknown` with no UPS),
+not yet seen on a live UPS.

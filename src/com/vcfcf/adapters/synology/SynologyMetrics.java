@@ -37,6 +37,17 @@ final class SynologyMetrics {
 		}
 	}
 
+	/**
+	 * Build 35 (review W1): the node's text, or {@code null} when the node is
+	 * missing, null or blank, so a status DSM did not send is skipped, never
+	 * published as {@code ""}. The text is published as DSM sent it.
+	 */
+	static <J> String text(SynologyTopology.Json<J> js, J node) {
+		if (node == null || js.isNull(node)) return null;
+		String s = js.str(node);
+		return s == null || s.trim().isEmpty() ? null : s;
+	}
+
 	// -----------------------------------------------------------------------
 	// Issue #18: memory
 	// -----------------------------------------------------------------------

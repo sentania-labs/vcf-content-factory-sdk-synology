@@ -29,7 +29,8 @@ final class SynologyRedaction {
 	 * Build 32 (issue #27): also the Suite API shapes ({@code password=},
 	 * {@code username=}, {@code user=}, {@code token=} and
 	 * {@code principal=} parameters, URL userinfo, JSON {@code username},
-	 * {@code password}, {@code token} and {@code authToken} members, and an
+	 * {@code password}, {@code token} and {@code authToken} members (build
+	 * 35: and DSM's {@code sid}, {@code synotoken} and {@code did}), and an
 	 * OpsToken, Bearer or Basic credential), for the Suite API exception
 	 * messages the adapter logs. Each query parameter value is masked up to
 	 * the next {@code &} or the end of the text,
@@ -58,7 +59,10 @@ final class SynologyRedaction {
 				// OpsToken, Bearer or Basic credential.
 				.replaceAll("(?i)(password=|username=|user=|token=|principal=)[^&]*",
 						"$1<redacted>")
-				.replaceAll("(?i)(\"(?:username|password|token|authToken)\"\\s*:\\s*\")"
+				// Build 35 (review N3): also DSM's login response members, the
+				// session id (sid), the CSRF token (synotoken) and the trusted
+				// device id (did), should a login body ever reach a log.
+				.replaceAll("(?i)(\"(?:username|password|token|authToken|sid|synotoken|did)\"\\s*:\\s*\")"
 						+ "(?:[^\"\\\\]|\\\\.)*", "$1<redacted>")
 				.replaceAll("(?i)(://)[^/\\s@]+@", "$1<redacted>@")
 				.replaceAll("(?i)((?:vRealizeOpsToken|OpsToken|Bearer|Basic)"

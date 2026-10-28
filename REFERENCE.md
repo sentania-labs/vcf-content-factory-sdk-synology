@@ -528,14 +528,18 @@ for it: DSM's status value for a pool in `missing_pools` is not yet seen
 (the lab NAS has none), and the pack publishes no value it has not seen.
 The DiskStation carries the signal instead: `Health|missing_pools`,
 `Health|storage_status`, `Health|expansion_unit_lost` (see Health above).
-The same "pointer to an object the list omits" rule covers a volume whose
-`pool_path` names an unlisted pool, and a disk whose `used_by` names
-neither a listed pool, a listed shared cache, a listed SSD cache
-(`ssdCaches[].id`) nor a hot spare (`hotspare`) (no pool counted), and a volume whose `cache.id` names an unlisted cache or a
+The same holds while a disk's `used_by` names neither a listed pool, a
+listed shared cache, a listed SSD cache (`ssdCaches[].id`) nor a hot spare
+(`hotspare`): no volume names that pool, so what lived on it may have left
+every list with it, and no Storage Pool, Volume, Disk, SSD Cache, iSCSI LUN
+or NFS Export counts a miss. The same "pointer to an object the list omits"
+rule covers a volume whose `pool_path` names an unlisted pool (no pool
+counted: the volume on it is still listed, so DSM has not dropped what
+lives on that pool), and a volume whose `cache.id` names an unlisted cache or a
 `sharedCaches` entry with `is_missing: true` (no SSD cache counted). The share list pages (`limit=2` returns 2 rows of `total`
 20 on the lab NAS); a `total` other than the rows returned counts no export.
 
-**An unknown disk `used_by` keeps pool removal off on that NAS.** The
+**An unknown disk `used_by` keeps storage removal off on that NAS.** The
 accepted values come from DSM's `storage_panel.js`: a hot spare is
 `hotspare` (`isHotspare`, `notUsedBySpace`), and a disk in a non-shared
 SSD cache names a space id of type `ssd`, the same type as that cache's
@@ -544,8 +548,9 @@ listed `ssdCaches[].id` is accepted. Neither has been seen live (the lab's
 disks name `reuse_1` or `shared_cache_1`; its only SSD cache,
 `alloc_cache_1_1`, sits on the shared cache). Any other value (a cache id
 in a form that is not exactly the listed id, `system`, a value from a newer
-DSM) counts no Storage Pool miss for as long as a disk carries it, with no
-log line; pools are then never marked, never deleted, on that NAS.
+DSM) counts no Storage Pool, Volume, Disk, SSD Cache, iSCSI LUN or NFS
+Export miss for as long as a disk carries it, with no log line; those
+objects are then never marked, never deleted, on that NAS.
 
 So one share whose NFS probe failed counts no export miss, however long it
 lasts, nor does a failed UPS, LUN or System Health read for its kind; the

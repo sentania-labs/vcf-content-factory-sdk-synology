@@ -55,8 +55,10 @@ import java.util.Set;
  *       there, or either key is absent (no evidence), none of the three is
  *       counted (review R3-B1). A volume whose {@code pool_path} names a
  *       pool not in {@code storagePools} also leaves the pool kind out
- *       (review R3-W1), and so does a disk whose {@code used_by} names
- *       neither a listed pool nor a listed shared cache (review R4-W1).
+ *       (review R3-W1). A disk whose {@code used_by} names neither a
+ *       listed pool nor a listed shared cache leaves all three out (review
+ *       R4-W1, PR #47 Codex P1): no volume names that pool, so its volumes
+ *       may have left their list with it.
  *       {@code overview_data.space_affect_by_eunit_lost} {@code true} or a
  *       non-empty {@code incompatible_eunit} (each only when DSM sent it;
  *       a value of the wrong type counts as affected) leaves all three out,
@@ -77,8 +79,9 @@ import java.util.Set;
  *   <li>SSD Cache, iSCSI LUN and NFS Export also need
  *       {@link #noUnassembledPool} and no affected expansion unit: each can
  *       live on an absent pool, so none is counted while a pool is missing
- *       or detected, while DSM did not say (review R3-B1), or while an
- *       expansion unit is lost or incompatible (review R4-W1).</li>
+ *       or detected, while DSM did not say (review R3-B1), while an
+ *       expansion unit is lost or incompatible (review R4-W1), or while a
+ *       disk names an unlisted pool (PR #47 Codex P1).</li>
  *   <li>{@code SynologyIscsiLun}: only when {@code SYNO.Core.ISCSI.LUN} was
  *       read, its {@code luns} was a non-empty list and every LUN carried its
  *       {@code uuid}. A NAS without SAN Manager (DSM error 102, read as no
@@ -212,7 +215,9 @@ final class ReadKinds {
 	 * Review R4-W1: some disk's {@code used_by} names neither a listed pool,
 	 * a listed shared or SSD cache nor a hot spare
 	 * ({@link StorageOverview#diskNamesUnlistedPool}).
-	 * DSM still knows the pool, so the pool list is not the inventory.
+	 * DSM still knows the pool, so the pool list is not the inventory, and
+	 * (PR #47 Codex P1) nor are the lists of what can live on it: every
+	 * storage-dependent kind is left out, as with a missing pool.
 	 */
 	void disksNameUnlistedPool(boolean unlisted) {
 		diskPoolDangling = unlisted;
@@ -353,9 +358,16 @@ final class ReadKinds {
 		// Review R3-B1: a missing or detected pool (or no word from DSM)
 		// leaves out every kind that can live on it.
 		// Review R4-W1: so does a lost or incompatible expansion unit.
-		boolean everyPoolAccounted = noUnassembledPool && !expansionUnitAffected;
+		// PR #47 Codex P1: and so does a disk naming an unlisted pool. That
+		// pool left storagePools, and no volume names it (else poolDangling),
+		// so what lived on it may have left every other list with it.
+		// A volume naming an unlisted pool (poolDangling) stays Pool only:
+		// the volume on it is still listed, so DSM has not dropped what
+		// lives on that pool.
+		boolean everyPoolAccounted = noUnassembledPool && !expansionUnitAffected
+				&& !diskPoolDangling;
 		boolean storageComplete = storageListsComplete && everyPoolAccounted;
-		if (storageComplete && poolsRead && !poolDangling && !diskPoolDangling) {
+		if (storageComplete && poolsRead && !poolDangling) {
 			out.add(POOL);
 		}
 		if (storageComplete && volumesRead) out.add(VOLUME);

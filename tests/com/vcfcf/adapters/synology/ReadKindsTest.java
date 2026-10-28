@@ -50,7 +50,7 @@ public final class ReadKindsTest {
 		volumeNamingUnlistedPoolKeepsPools();
 		unlistedOrMissingCacheKeepsCaches();
 		pagedShareListMarksNoExport();
-		diskNamingUnlistedPoolKeepsPools();
+		diskNamingUnlistedPoolKeepsStorage();
 		expansionUnitLostOrIncompatibleKeepsStorage();
 		worldIsExcluded();
 		System.out.println("ReadKindsTest: all assertions passed");
@@ -559,24 +559,52 @@ public final class ReadKindsTest {
 	 * Review R4-W1: a multi-pool NAS whose pool B left storagePools without
 	 * entering missing_pools or detected_pools; its disks still name it. Pool
 	 * A is still listed (pools > 0), so before the fix Pool was declared and
-	 * B counted a miss every cycle.
+	 * B counted a miss every cycle. PR #47 Codex P1: only Pool was left out,
+	 * so the volumes, disks, caches, LUNs and exports that went missing with
+	 * B still counted misses and were marked at the 12th cycle. The disk
+	 * evidence is in the shared gate now: every kind that can live on a pool
+	 * is left out, as with a missing or detected pool; DiskStation and UPS
+	 * still count.
 	 */
-	static void diskNamingUnlistedPoolKeepsPools() {
+	static void diskNamingUnlistedPoolKeepsStorage() {
 		ReadKinds r = complete();
 		r.disksNameUnlistedPool(StorageOverview.diskNamesUnlistedPool(
 				Arrays.asList("reuse_1", "reuse_2", "reuse_2"),
 				Arrays.asList("reuse_1"), Arrays.asList("shared_cache_1"),
 				Arrays.asList("alloc_cache_1_1")));
-		assertOnlyOut(r.kinds(), set(ReadKinds.POOL), "disk names reuse_2");
+		assertOnlyOut(r.kinds(), ON_A_POOL, "disk names reuse_2");
+		for (String kind : ON_A_POOL) {
+			marksNothingOf(r.kinds(), kind, "disk names reuse_2: no " + kind
+					+ " counted");
+		}
+		T.check(r.kinds().contains(ReadKinds.DISKSTATION)
+				&& r.kinds().contains(ReadKinds.UPS),
+				"disk names reuse_2: DS and UPS read");
+		// Pool B and what lived on it are gone from every list; pool A and
+		// its objects are still delivered. Nothing of B is counted.
 		Map<String, String> known = new HashMap<>();
 		known.put("pool:reuse_1", ReadKinds.POOL);
+		known.put("vol:1", ReadKinds.VOLUME);
+		known.put("disk:1", ReadKinds.DISK);
 		known.put("pool:reuse_2", ReadKinds.POOL);
+		known.put("vol:2", ReadKinds.VOLUME);
+		known.put("disk:2", ReadKinds.DISK);
+		known.put("cache:2", ReadKinds.CACHE);
+		known.put("lun:2", ReadKinds.LUN);
+		known.put("export:2", ReadKinds.EXPORT);
 		Model m = new Model();
 		for (int i = 0; i < 30; i++) {
-			m.cycle(known, set("pool:reuse_1"), r.kinds());
+			m.cycle(known, set("pool:reuse_1", "vol:1", "disk:1"), r.kinds());
 		}
 		T.check(m.misses.isEmpty() && m.marked.isEmpty(),
-				"30 cycles with reuse_2 unlisted: nothing counted");
+				"30 cycles with reuse_2 unlisted: nothing on any pool counted");
+		// The disks name only listed pools again: the gate opens.
+		ReadKinds ok = complete();
+		ok.disksNameUnlistedPool(StorageOverview.diskNamesUnlistedPool(
+				Arrays.asList("reuse_1", "reuse_1"), Arrays.asList("reuse_1"),
+				Arrays.asList("shared_cache_1"),
+				Arrays.asList("alloc_cache_1_1")));
+		T.eq(complete().kinds(), ok.kinds(), "every disk names a listed pool");
 	}
 
 	/**

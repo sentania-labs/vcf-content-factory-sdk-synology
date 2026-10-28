@@ -32,6 +32,7 @@ public final class NfsProbesTest {
 	public static void main(String[] args) throws Exception {
 		exportsAreSharesWithRules();
 		failedProbeIsRecordedNotZeroRules();
+		answerWithNoRuleListIsAFailedProbe();
 		connectFailureAndLoginRefusalEndTheBuild();
 		answersAreReusedUntilTheRefresh();
 		newShareIsProbedAtOnceAndGoneShareForgotten();
@@ -227,5 +228,31 @@ public final class NfsProbesTest {
 		T.check(!NfsProbes.serviceOff(true, false, true), "enabled: probe");
 		T.check(!NfsProbes.serviceOff(false, false, false), "unread: probe as before");
 		T.check(!NfsProbes.serviceOff(true, true, false), "field missing: probe as before");
+	}
+
+	/**
+	 * Build 35 review: a success-shaped answer with no rule list (the count
+	 * function returns -1) is a failed probe, recorded and not remembered,
+	 * never "not an export".
+	 */
+	static void answerWithNoRuleListIsAFailedProbe() throws Exception {
+		FakeNas nas = new FakeNas();
+		nas.rules.put("vmware", -1);
+		nas.rules.put("backups", 1);
+		List<String> warns = new ArrayList<>();
+		NfsProbes.Cached<Integer> p = new NfsProbes.Cached<>(() -> 0L,
+				15 * 60_000L, 0L);
+		NfsProbes.Result<Integer> r = p.run(Arrays.asList("vmware", "backups"),
+				nas::load, n -> n, next -> { }, warns::add);
+		T.check(r.failed.containsKey("vmware"), "no rule list: failed " + r.failed);
+		T.check(!r.rulesByShare.containsKey("vmware"), "and not an export");
+		T.eq(Integer.valueOf(1), r.rulesByShare.get("backups"), "others probed");
+		T.eq(1, warns.size(), "one WARN");
+		// Not remembered: the next build probes it again, inside the refresh.
+		nas.calls.clear();
+		p.run(Arrays.asList("vmware", "backups"), nas::load, n -> n, next -> { },
+				warns::add);
+		T.check(nas.calls.contains("vmware"), "probed again next build");
+		T.check(!nas.calls.contains("backups"), "a good answer is reused");
 	}
 }

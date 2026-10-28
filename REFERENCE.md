@@ -444,11 +444,23 @@ counts a miss (`ReadKinds`):
 | Kinds | Counted only when |
 |---|---|
 | Diskstation | `SYNO.Core.System.SystemHealth` was read too (the DiskStation itself comes from `SYNO.DSM.Info`, which every cycle needs) |
-| Storage Pool, Volume, Disk | storage `load_info` was complete: pools, volumes and disks each a list, at least one disk, and every pool, volume and disk with its id (a volume's `volume_id`, else `vol_path`) |
-| SSD Cache | `load_info` sent `ssdCaches` as a list with an `id` on every cache |
-| iSCSI LUN | `SYNO.Core.ISCSI.LUN` was read and sent `luns` as a list with a `uuid` on every LUN |
-| NFS Export | `SYNO.Core.Share` was read as a list with a name on every share, the NFS service was not reported off, and no share's NFS rule probe failed |
+| Storage Pool, Volume, Disk | storage `load_info` was complete: pools, volumes and disks each a list, at least one disk, and every pool, volume and disk with its id (a volume's `volume_id`, else `vol_path`). An empty pool or volume list counts only when both are empty and every disk states a `used_by` that is empty or a listed shared cache (no disk is in a pool) |
+| SSD Cache | `load_info` sent `ssdCaches` as a list with an `id` on every cache. An empty list counts only when `sharedCaches` is an empty list, no volume has a `cache.id`, and every disk states a `used_by` that is empty or a listed pool |
+| iSCSI LUN | `SYNO.Core.ISCSI.LUN` was read and sent `luns` as a non-empty list with a `uuid` on every LUN |
+| NFS Export | `SYNO.Core.Share` was read as a non-empty list with a name on every share, the NFS service was not reported off, no share's NFS rule probe failed (an answer with no rule list counts as failed), and at least one share is an export |
 | UPS | `SYNO.Core.ExternalDevice.UPS` answered with `usb_ups_connect`, and with the `model` when a UPS is connected; an answer of no UPS connected counts the old UPS as gone |
+
+**An empty answer is not proof that everything is gone.** An empty list
+counts a miss only when another field DSM sends shows the kind really is
+empty (the evidence in the table); otherwise it counts nothing. No such
+field is known for LUNs, NFS exports, or volumes on a pool that still
+exists, so **the last object of those kinds is never removed
+automatically**: after deleting the last LUN, turning off NFS on the last
+exported share, or deleting the last volume of a pool, delete its object by
+hand. The same holds for the last pool or SSD cache when a disk does not
+state its `used_by` (DSM's value for an unused disk is not yet seen live).
+A DSM error inside an HTTP 200 (`success: false`) is a failed read, never an
+empty one: the endpoint is unread and its kind counts nothing.
 
 So one share whose NFS probe failed counts no export miss, however long it
 lasts, nor does a failed UPS, LUN or System Health read for its kind; the

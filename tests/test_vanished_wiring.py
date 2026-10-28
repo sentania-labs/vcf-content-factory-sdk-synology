@@ -53,19 +53,48 @@ def enumeration():
     assert enum.count("storageNoId++") == 3
     st = enum.index("read.storage(")
     assert st > enum.index('storage.data().get("disks").asList()')
-    assert 'storage.data().get("disks").isList(), disks, storageNoId);' in enum
-    assert "read.ssdCaches(ssdCaches.isList(), cachesNoId);" in enum
-    assert "read.luns(s.isRead(SnapshotReads.LUNS), lunList.isList(), lunsNoUuid);" in enum
+    assert ('storage.data().get("disks").isList(), pools, volumes, disks,\n'
+            '\t\t\t\tstorageNoId, ReadKinds.noPoolConfigured(diskUsedBy, sharedCacheIds));') in enum
+    # Build 35 review: empty lists need evidence, gathered from this load_info.
+    assert 'SimpleJson usedBy = disk.get("used_by");' in enum
+    assert 'storage.data().get("sharedCaches")' in enum
+    assert 'vol.get("cache").get("id")' in enum
+    assert ("read.ssdCaches(ssdCaches.isList(), caches, cachesNoId,\n"
+            "\t\t\t\tReadKinds.noCacheConfigured(sharedCacheIds, diskUsedBy, poolIds,\n"
+            "\t\t\t\t\t\tvolumeCached));") in enum
+    assert ("read.luns(s.isRead(SnapshotReads.LUNS), lunList.isList(), luns,\n"
+            "\t\t\t\tlunsNoUuid);") in enum
     assert "for (SimpleJson lun : lunList.asList())" in enum
     # NFS: the share list walked, the service state, every failed probe.
     assert "for (SimpleJson share : shareList.asList())" in enum
     assert ("read.exports(s.isRead(SnapshotReads.SHARES), shareList.isList(),\n"
-            "\t\t\t\tsharesNoName, s.nfsDisabled, s.nfsProbeFailed.size());") in enum
+            "\t\t\t\tshareList.isList() ? shareList.asList().size() : 0,\n"
+            "\t\t\t\tsharesNoName, s.nfsDisabled, s.nfsProbeFailed.size(), exports);") in enum
     assert "read.ups(upsAnswer != null," in enum
     assert '!upsAnswer.get("usb_ups_connect").isNull()' in enum
     # Each read is declared once.
     for call in ("systemHealth", "storage", "ssdCaches", "luns", "exports", "ups"):
         assert enum.count(f"read.{call}(") == 1, call
+
+
+def dsm_errors():
+    # Build 35 review: a DSM error in a 200 (success false) is never a read.
+    # Every data API goes through call(), which throws on it; the UPS answer
+    # and the NFS rule probes are data API calls too.
+    client = (ROOT / "src/com/vcfcf/adapters/synology/SynologyApiClient.java").read_text()
+    m = re.search(r"private SimpleJson call\(String api[^{]*\{", client)
+    assert m, "call() not found"
+    body = client[m.end():client.index("\n\t}\n", m.end())]
+    assert body.count("if (!resp.isSuccess()) {") == 2, "success checked before and after re-login"
+    assert "throw new SynologyDsmException(" in body
+    for api in ('return call("SYNO.Core.Share", 1, "list",',
+                'return call("SYNO.Core.ISCSI.LUN", 1, "list");',
+                'return call("SYNO.Core.FileServ.NFS.SharePrivilege", 1, "load",',
+                'return call("SYNO.Core.ExternalDevice.UPS", 1, "get");'):
+        assert api in client, api
+    # A probe answer with no rule list is a failed probe, not zero rules.
+    assert ('rules -> rules.data().get("rule").isList()\n'
+            '\t\t\t\t\t\t\t\t? rules.data().get("rule").size() : -1,') in SRC
 
 
 def snapshot():
@@ -78,6 +107,7 @@ def snapshot():
 def main():
     hooks()
     enumeration()
+    dsm_errors()
     snapshot()
     print("test_vanished_wiring: all assertions passed")
 

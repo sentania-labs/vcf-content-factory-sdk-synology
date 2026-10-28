@@ -657,9 +657,37 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					"disk_id", diskId, dev));
 			disks++;
 		}
+		// Build 35: an empty pool, volume or SSD cache list is complete only
+		// on positive evidence from the rest of load_info (ReadKinds).
+		List<String> poolIds = new ArrayList<>();
+		for (SimpleJson pool : storage.data().get("storagePools").asList()) {
+			poolIds.add(pool.get("id").asString(""));
+		}
+		List<String> diskUsedBy = new ArrayList<>();
+		for (SimpleJson disk : storage.data().get("disks").asList()) {
+			SimpleJson usedBy = disk.get("used_by");
+			// A missing used_by, or a list or object, is no evidence (null).
+			diskUsedBy.add(usedBy.isNull() || usedBy.isList() || usedBy.isObject()
+					? null : usedBy.asString());
+		}
+		SimpleJson sharedCaches = storage.data().get("sharedCaches");
+		List<String> sharedCacheIds = null;
+		if (sharedCaches.isList()) {
+			sharedCacheIds = new ArrayList<>();
+			for (SimpleJson sc : sharedCaches.asList()) {
+				sharedCacheIds.add(sc.get("id").asString(""));
+			}
+		}
+		boolean volumeCached = false;
+		for (SimpleJson vol : storage.data().get("volumes").asList()) {
+			if (!ReadKinds.noId(vol.get("cache").get("id").asString())) {
+				volumeCached = true;
+			}
+		}
 		read.storage(storage.data().get("storagePools").isList(),
 				storage.data().get("volumes").isList(),
-				storage.data().get("disks").isList(), disks, storageNoId);
+				storage.data().get("disks").isList(), pools, volumes, disks,
+				storageNoId, ReadKinds.noPoolConfigured(diskUsedBy, sharedCacheIds));
 		SimpleJson ssdCaches = storage.data().get("ssdCaches");
 		if (!ssdCaches.isNull()) {
 			for (SimpleJson cache : ssdCaches.asList()) {
@@ -671,7 +699,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				caches++;
 			}
 		}
-		read.ssdCaches(ssdCaches.isList(), cachesNoId);
+		read.ssdCaches(ssdCaches.isList(), caches, cachesNoId,
+				ReadKinds.noCacheConfigured(sharedCacheIds, diskUsedBy, poolIds,
+						volumeCached));
 
 		SimpleJson lunList = s.lunList.data().get("luns");
 		for (SimpleJson lun : lunList.asList()) {
@@ -681,7 +711,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 					lun.get("name").asString(uuid), "lun_uuid", uuid, dev));
 			luns++;
 		}
-		read.luns(s.isRead(SnapshotReads.LUNS), lunList.isList(), lunsNoUuid);
+		read.luns(s.isRead(SnapshotReads.LUNS), lunList.isList(), luns,
+				lunsNoUuid);
 
 		// NFS exports: a share is an export iff the snapshot kept >0 NFS rules
 		// for it (nfsRulesByShare). Same gating as build 16's per-share probe,
@@ -698,7 +729,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 		// Build 35: one failed share probe leaves every export out.
 		read.exports(s.isRead(SnapshotReads.SHARES), shareList.isList(),
-				sharesNoName, s.nfsDisabled, s.nfsProbeFailed.size());
+				shareList.isList() ? shareList.asList().size() : 0,
+				sharesNoName, s.nfsDisabled, s.nfsProbeFailed.size(), exports);
 
 		// UPS (optional): present in the snapshot only when usb_ups_connect=true.
 		if (s.ups != null) {
@@ -1901,7 +1933,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				}
 				NfsProbes.Result<SimpleJson> probes = nfsProbes.run(shareNames,
 						api::nfsSharePrivilege,
-						rules -> rules.data().get("rule").size(),
+						// Build 35: no rule list is a failed probe (-1).
+						rules -> rules.data().get("rule").isList()
+								? rules.data().get("rule").size() : -1,
 						adapter::checkpoint, adapter::logWarn);
 				nfsRulesByShare.putAll(probes.rulesByShare);
 				nfsProbeFailed.putAll(probes.failed);

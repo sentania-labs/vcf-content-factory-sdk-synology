@@ -1,7 +1,9 @@
 package com.vcfcf.adapters.synology;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
@@ -34,6 +36,14 @@ public final class ReadKindsTest {
 		shareListUnreadMarksNoExport();
 		nfsServiceOffMarksNoExport();
 		incompleteLoadInfoMarksNoPoolVolumeOrDisk();
+		emptyShareListMarksNoExport();
+		zeroExportsMarksNoExport();
+		emptyLunListMarksNoLun();
+		emptyPoolListNeedsDiskEvidence();
+		emptyVolumeListWithAPoolMarksNoVolume();
+		noPoolConfiguredEvidence();
+		emptyCacheListNeedsEvidence();
+		dsmErrorIn200IsUnread();
 		worldIsExcluded();
 		System.out.println("ReadKindsTest: all assertions passed");
 	}
@@ -42,10 +52,10 @@ public final class ReadKindsTest {
 	private static ReadKinds complete() {
 		ReadKinds r = new ReadKinds();
 		r.systemHealth(true);
-		r.storage(true, true, true, 7, 0);
-		r.ssdCaches(true, 0);
-		r.luns(true, true, 0);
-		r.exports(true, true, 0, false, 0);
+		r.storage(true, true, true, 1, 1, 7, 0, false);
+		r.ssdCaches(true, 1, 0, false);
+		r.luns(true, true, 2, 0);
+		r.exports(true, true, 12, 0, false, 0, 10);
 		r.ups(true, true, true, true);
 		return r;
 	}
@@ -206,27 +216,27 @@ public final class ReadKindsTest {
 
 	static void ssdCacheReadFailureMarksNoCache() {
 		ReadKinds r = complete();
-		r.ssdCaches(false, 0);
+		r.ssdCaches(false, 0, 0, false);
 		assertOnlyOut(r.kinds(), set(ReadKinds.CACHE), "no ssdCaches list");
 		marksNothingOf(r.kinds(), ReadKinds.CACHE, "no SSD cache counted");
 		r = complete();
-		r.ssdCaches(true, 1);
+		r.ssdCaches(true, 1, 1, false);
 		assertOnlyOut(r.kinds(), set(ReadKinds.CACHE), "a cache without id");
 	}
 
 	static void iscsiReadFailureMarksNoLun() {
 		ReadKinds r = complete();
-		r.luns(false, false, 0);
+		r.luns(false, false, 2, 0);
 		assertOnlyOut(r.kinds(), set(ReadKinds.LUN), "LUN list unread");
 		marksNothingOf(r.kinds(), ReadKinds.LUN, "no LUN counted");
 		r = complete();
-		r.luns(false, true, 0); // unread decides, whatever the payload
+		r.luns(false, true, 2, 0); // unread decides, whatever the payload
 		assertOnlyOut(r.kinds(), set(ReadKinds.LUN), "LUN list unread (list set)");
 		r = complete();
-		r.luns(true, false, 0); // DSM 102, not installed: no list
+		r.luns(true, false, 2, 0); // DSM 102, not installed: no list
 		assertOnlyOut(r.kinds(), set(ReadKinds.LUN), "LUN endpoint with no list");
 		r = complete();
-		r.luns(true, true, 1);
+		r.luns(true, true, 2, 1);
 		assertOnlyOut(r.kinds(), set(ReadKinds.LUN), "a LUN without uuid");
 	}
 
@@ -244,7 +254,7 @@ public final class ReadKindsTest {
 	 */
 	static void nfsProbeFailureMarksNoExport() {
 		ReadKinds r = complete();
-		r.exports(true, true, 0, false, 1);
+		r.exports(true, true, 12, 0, false, 1, 10);
 		Set<String> k = r.kinds();
 		assertOnlyOut(k, set(ReadKinds.EXPORT), "one failed probe: no export kind");
 		Map<String, String> known = new HashMap<>();
@@ -259,32 +269,32 @@ public final class ReadKindsTest {
 
 	static void shareListUnreadMarksNoExport() {
 		ReadKinds r = complete();
-		r.exports(false, false, 0, false, 0);
+		r.exports(false, false, 12, 0, false, 0, 10);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "share list unread");
 		r = complete();
-		r.exports(false, true, 0, false, 0);
+		r.exports(false, true, 12, 0, false, 0, 10);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "share list unread (list set)");
 		r = complete();
-		r.exports(true, true, 1, false, 0);
+		r.exports(true, true, 12, 1, false, 0, 10);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "a share without name");
 	}
 
 	static void nfsServiceOffMarksNoExport() {
 		ReadKinds r = complete();
-		r.exports(true, true, 0, true, 0);
+		r.exports(true, true, 12, 0, true, 0, 10);
 		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT),
 				"NFS off: exports are ERROR, not gone");
 	}
 
 	static void incompleteLoadInfoMarksNoPoolVolumeOrDisk() {
 		ReadKinds r = complete();
-		r.storage(true, true, true, 7, 1);
+		r.storage(true, true, true, 1, 1, 7, 1, false);
 		assertOnlyOut(r.kinds(), STORAGE, "a record without identity");
 		r = complete();
-		r.storage(true, false, true, 7, 0);
+		r.storage(true, false, true, 1, 1, 7, 0, false);
 		assertOnlyOut(r.kinds(), STORAGE, "no volume list");
 		r = complete();
-		r.storage(true, true, true, 0, 0);
+		r.storage(true, true, true, 1, 1, 0, 0, false);
 		assertOnlyOut(r.kinds(), STORAGE, "zero disks is not a complete read");
 		marksNothingOf(r.kinds(), ReadKinds.DISK, "no disk counted");
 		T.check(r.kinds().contains(ReadKinds.CACHE),
@@ -296,5 +306,138 @@ public final class ReadKindsTest {
 		T.check(!complete().kinds().contains(ReadKinds.WORLD), "World never named");
 		T.check(ReadKinds.noId(null) && ReadKinds.noId("") && !ReadKinds.noId("x"),
 				"noId");
+	}
+
+	// --- Build 35 review: an empty answer is not proof everything is gone ---
+
+	/** devel's disks: five in pool reuse_1, two in shared cache 1. */
+	private static final List<String> DEVEL_DISKS = Arrays.asList("reuse_1",
+			"reuse_1", "reuse_1", "reuse_1", "reuse_1", "shared_cache_1",
+			"shared_cache_1");
+	private static final List<String> POOLS = Collections.singletonList("reuse_1");
+	private static final List<String> SHARED = Collections.singletonList("shared_cache_1");
+	private static final List<String> NONE = Collections.emptyList();
+
+	static void emptyShareListMarksNoExport() {
+		ReadKinds r = complete();
+		r.exports(true, true, 0, 0, false, 0, 0);
+		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "shares: [] is not proof");
+		marksNothingOf(r.kinds(), ReadKinds.EXPORT,
+				"30 cycles of an empty share list: no export counted");
+	}
+
+	/** Every probe answered "no rules": not proof either. */
+	static void zeroExportsMarksNoExport() {
+		ReadKinds r = complete();
+		r.exports(true, true, 12, 0, false, 0, 0);
+		assertOnlyOut(r.kinds(), set(ReadKinds.EXPORT), "zero exports is not proof");
+		r = complete();
+		r.exports(true, true, 12, 0, false, 0, 1);
+		T.check(r.kinds().contains(ReadKinds.EXPORT), "one export: read");
+	}
+
+	static void emptyLunListMarksNoLun() {
+		ReadKinds r = complete();
+		r.luns(true, true, 0, 0);
+		assertOnlyOut(r.kinds(), set(ReadKinds.LUN), "luns: [] is not proof");
+		marksNothingOf(r.kinds(), ReadKinds.LUN,
+				"30 cycles of an empty LUN list: no LUN counted");
+	}
+
+	static void emptyPoolListNeedsDiskEvidence() {
+		// No evidence: pools and volumes out, disks (non-empty) still read.
+		ReadKinds r = complete();
+		r.storage(true, true, true, 0, 0, 7, 0, false);
+		assertOnlyOut(r.kinds(), set(ReadKinds.POOL, ReadKinds.VOLUME),
+				"storagePools: [] without evidence");
+		marksNothingOf(r.kinds(), ReadKinds.POOL, "no pool counted");
+		// Evidence, but a volume is listed: a volume needs a pool.
+		r = complete();
+		r.storage(true, true, true, 0, 1, 7, 0, true);
+		assertOnlyOut(r.kinds(), set(ReadKinds.POOL),
+				"no pool listed but a volume is: pools not read");
+		// Evidence and no volume: both really empty.
+		r = complete();
+		r.storage(true, true, true, 0, 0, 7, 0, true);
+		T.eq(complete().kinds(), r.kinds(),
+				"no pool, no volume, every disk unused: read");
+		// The evidence does not rescue an incomplete load_info.
+		r = complete();
+		r.storage(true, true, true, 0, 0, 0, 0, true);
+		assertOnlyOut(r.kinds(), STORAGE, "zero disks: nothing read");
+	}
+
+	static void emptyVolumeListWithAPoolMarksNoVolume() {
+		ReadKinds r = complete();
+		r.storage(true, true, true, 1, 0, 7, 0, false);
+		assertOnlyOut(r.kinds(), set(ReadKinds.VOLUME),
+				"volumes: [] on a pool: not proof");
+		r = complete();
+		r.storage(true, true, true, 1, 0, 7, 0, true);
+		assertOnlyOut(r.kinds(), set(ReadKinds.VOLUME),
+				"evidence of no pool contradicts a listed pool: volumes not read");
+	}
+
+	static void noPoolConfiguredEvidence() {
+		T.check(!ReadKinds.noPoolConfigured(DEVEL_DISKS, SHARED),
+				"devel: disks name reuse_1, a pool");
+		T.check(ReadKinds.noPoolConfigured(Arrays.asList("", "", "shared_cache_1"),
+				SHARED), "unused disks and a cache disk: no pool");
+		T.check(!ReadKinds.noPoolConfigured(Arrays.asList("", null), SHARED),
+				"a disk with no used_by is no evidence");
+		T.check(!ReadKinds.noPoolConfigured(Arrays.asList("", "shared_cache_1"),
+				null), "sharedCaches not a list: a cache disk is unexplained");
+		T.check(!ReadKinds.noPoolConfigured(NONE, SHARED), "no disks: no evidence");
+		T.check(!ReadKinds.noPoolConfigured(null, SHARED), "no disk list: no evidence");
+	}
+
+	static void emptyCacheListNeedsEvidence() {
+		// devel's load_info with ssdCaches: [] is contradicted three ways.
+		T.check(!ReadKinds.noCacheConfigured(SHARED, DEVEL_DISKS, POOLS, true),
+				"devel: a shared cache, cache disks, a cached volume");
+		ReadKinds r = complete();
+		r.ssdCaches(true, 0, 0, false);
+		assertOnlyOut(r.kinds(), set(ReadKinds.CACHE), "ssdCaches: [] without evidence");
+		marksNothingOf(r.kinds(), ReadKinds.CACHE, "no SSD cache counted");
+
+		List<String> poolOnly = Arrays.asList("reuse_1", "reuse_1", "");
+		T.check(ReadKinds.noCacheConfigured(NONE, poolOnly, POOLS, false),
+				"no cache group, no cached volume, disks in a pool or unused");
+		T.check(!ReadKinds.noCacheConfigured(null, poolOnly, POOLS, false),
+				"sharedCaches not a list: no evidence");
+		T.check(!ReadKinds.noCacheConfigured(SHARED, poolOnly, POOLS, false),
+				"a cache group exists");
+		T.check(!ReadKinds.noCacheConfigured(NONE, poolOnly, POOLS, true),
+				"a volume names a cache");
+		T.check(!ReadKinds.noCacheConfigured(NONE,
+				Arrays.asList("reuse_1", "shared_cache_1"), POOLS, false),
+				"a disk names a cache group");
+		T.check(!ReadKinds.noCacheConfigured(NONE,
+				Arrays.asList("reuse_1", null), POOLS, false),
+				"a disk with no used_by");
+		T.check(!ReadKinds.noCacheConfigured(NONE, NONE, POOLS, false),
+				"no disks: no evidence");
+
+		r = complete();
+		r.ssdCaches(true, 0, 0, true);
+		T.check(r.kinds().contains(ReadKinds.CACHE), "ssdCaches: [] with evidence: read");
+	}
+
+	/**
+	 * A DSM error in a 200 ({@code success: false}) throws in
+	 * {@code SynologyApiClient.call} (wiring pinned in
+	 * tests/test_vanished_wiring.py), so the endpoint is unread
+	 * (SnapshotReadsTest), and an unread endpoint declares nothing, whatever
+	 * the stored value holds.
+	 */
+	static void dsmErrorIn200IsUnread() {
+		ReadKinds r = complete();
+		r.luns(false, true, 2, 0);
+		r.exports(false, true, 12, 0, false, 0, 10);
+		assertOnlyOut(r.kinds(), set(ReadKinds.LUN, ReadKinds.EXPORT),
+				"LUN and share lists unread on a DSM error");
+		r = complete();
+		r.ups(false, true, false, false);
+		assertOnlyOut(r.kinds(), set(ReadKinds.UPS), "UPS unread on a DSM error");
 	}
 }

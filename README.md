@@ -173,7 +173,11 @@ hand once its children are gone.
 Only a kind read in full counts a miss, so a failed read never deletes
 anything: one share whose NFS rule probe failed counts no export miss that
 cycle, and a failed UPS, SSD cache, iSCSI or System Health read counts no
-miss for its kind. Details: REFERENCE.md, Removed objects. The framework's
+miss for its kind. An empty list is not proof that everything is gone: it
+counts no miss unless another DSM field shows the kind really is empty, so
+the last LUN, the last NFS export and the last volume on a pool are never
+removed automatically; delete those by hand. Details: REFERENCE.md, Removed
+objects. The framework's
 own warning is in the factory's buildkit release notes
 (`.github/release-notes-buildkit.md`, Behavior since 1.0.22, "On first
 opt-in, every orphan goes").

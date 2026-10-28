@@ -432,18 +432,26 @@ does not send it (build 35; before, a missing count was published as `0`).
 **Name**: Synology DiskStation Storage Tree
 
 ```
-synology_diskstation
-    └── Synology World
-        └── Synology Diskstation
-            ├── Synology Storage Pool
-            │   ├── Synology Volume
-            │   │   ├── Synology iSCSI LUN
-            │   │   ├── Synology NFS Export
-            │   │   └── Synology SSD Cache
-            │   │       └── Synology Disk
-            │   └── Synology Disk
-            └── Synology UPS
+Synology World
+    └── Synology Diskstation
+        ├── Synology Storage Pool
+        │   ├── Synology Volume
+        │   │   ├── Synology iSCSI LUN
+        │   │   ├── Synology NFS Export
+        │   │   └── Synology SSD Cache
+        │   │       └── Synology Disk
+        │   └── Synology Disk
+        └── Synology UPS
 ```
+
+The spec is rooted at the World kind (`rootResourceKind="SynologyWorld"`,
+each path starting
+`synology_diskstation::SynologyWorld||synology_diskstation::SynologyDiskstation::child||...`),
+as VMware's own vSphere adapter roots "vSphere Hosts and Clusters" at
+`VMWARE::vSphere World`. Up to build 34 it was rooted at the adapter instance
+kind; the instance resource has no children (its only parent is Universe), so
+the tree showed the instance and nothing under it (devel and devel_9_1,
+2026-10-28). The adapter instance is not linked to the World.
 
 ## Bundled alerts
 

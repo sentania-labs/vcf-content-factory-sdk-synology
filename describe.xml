@@ -410,11 +410,19 @@
 		<TraversalSpecKind name="Synology DiskStation Storage Tree"
 		                   nameKey="240"
 		                   rootAdapterKind="synology_diskstation"
-		                   rootResourceKind="synology_diskstation"
+		                   rootResourceKind="SynologyWorld"
 		                   filterType="GENERIC_RELATION"
 		                   usedFor="ALL">
+			<!-- Build 35 (traversal root): the spec roots at SynologyWorld, as
+			     VMWARE roots "vSphere Hosts and Clusters" at "vSphere World"
+			     (each path starts at the root kind itself, no ::child). Up to
+			     build 34 it rooted at the adapter instance kind, whose resource
+			     has no children (its only parent is Universe), so the first hop
+			     to SynologyWorld never matched and the tree stopped at the
+			     instance. The instance is not linked to the World: no such
+			     edge exists in the collected data. -->
 			<!-- World > Diskstation > StoragePool > Volume > iSCSI LUN -->
-			<ResourcePath path="synology_diskstation::synology_diskstation||synology_diskstation::SynologyWorld::child||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologyIscsiLun::child"/>
+			<ResourcePath path="synology_diskstation::SynologyWorld||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologyIscsiLun::child"/>
 			<!-- Cross-MP foreign edge (1.0.0.18): the VMWARE Datastore is the
 			     PARENT of its backing iSCSI LUN (runtime parentForeign(ds, lun)).
 			     Reached from the synology side via the INVERSE modifier (::~child)
@@ -424,20 +432,20 @@
 			     devel: NFS edges persisted without any declarative path). Kept
 			     symmetric with the NFS path below so both storage types navigate
 			     identically. -->
-			<ResourcePath path="synology_diskstation::synology_diskstation||synology_diskstation::SynologyWorld::child||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologyIscsiLun::child||VMWARE::Datastore::~child"/>
+			<ResourcePath path="synology_diskstation::SynologyWorld||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologyIscsiLun::child||VMWARE::Datastore::~child"/>
 			<!-- World > Diskstation > StoragePool > Volume > NFS Export -->
-			<ResourcePath path="synology_diskstation::synology_diskstation||synology_diskstation::SynologyWorld::child||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologyNfsExport::child"/>
+			<ResourcePath path="synology_diskstation::SynologyWorld||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologyNfsExport::child"/>
 			<!-- Cross-MP foreign edge (1.0.0.18): the VMWARE Datastore is the
 			     PARENT of its backing NFS Export (runtime parentForeign(ds,
 			     export)). Same INVERSE modifier (::~child) and same UI-navigation-
 			     only role as the iSCSI path above — symmetric by design. -->
-			<ResourcePath path="synology_diskstation::synology_diskstation||synology_diskstation::SynologyWorld::child||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologyNfsExport::child||VMWARE::Datastore::~child"/>
+			<ResourcePath path="synology_diskstation::SynologyWorld||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologyNfsExport::child||VMWARE::Datastore::~child"/>
 			<!-- World > Diskstation > StoragePool > Volume > SSD Cache > Disk (cache) -->
-			<ResourcePath path="synology_diskstation::synology_diskstation||synology_diskstation::SynologyWorld::child||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologySsdCache::child||synology_diskstation::SynologyDisk::child"/>
+			<ResourcePath path="synology_diskstation::SynologyWorld||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyVolume::child||synology_diskstation::SynologySsdCache::child||synology_diskstation::SynologyDisk::child"/>
 			<!-- World > Diskstation > StoragePool > Disk -->
-			<ResourcePath path="synology_diskstation::synology_diskstation||synology_diskstation::SynologyWorld::child||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyDisk::child"/>
+			<ResourcePath path="synology_diskstation::SynologyWorld||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyStoragePool::child||synology_diskstation::SynologyDisk::child"/>
 			<!-- World > Diskstation > UPS -->
-			<ResourcePath path="synology_diskstation::synology_diskstation||synology_diskstation::SynologyWorld::child||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyUps::child"/>
+			<ResourcePath path="synology_diskstation::SynologyWorld||synology_diskstation::SynologyDiskstation::child||synology_diskstation::SynologyUps::child"/>
 		</TraversalSpecKind>
 	</TraversalSpecKinds>
 

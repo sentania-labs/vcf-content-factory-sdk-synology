@@ -27,3 +27,4 @@ python3 tests/test_describe_units.py
 python3 tests/test_api_info_wiring.py
 python3 tests/test_collect_wiring.py
 python3 tests/test_device_identity_wiring.py
+python3 tests/test_traversal_root.py

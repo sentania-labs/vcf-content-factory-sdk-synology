@@ -1,6 +1,6 @@
 name: "[VCF Content Factory] Synology Disk Failing"
 description: >
-  Fires when a Synology disk reports a SMART status that is not normal (critical) or an uncorrectable sector count that is increasing (warning).
+  Fires when a Synology disk reports a failing SMART status (failing, degraded or access_err; critical) or an uncorrectable sector count that is increasing (warning).
 adapter_kind: synology_diskstation
 resource_kind: SynologyDisk
 type: 18
@@ -16,7 +16,7 @@ symptom_sets:
     - defined_on: SELF
       operator: ALL
       symptoms:
-        - name: "[VCF Content Factory] Synology Disk SMART Status Not Normal"
+        - name: "[VCF Content Factory] Synology Disk SMART Failing"
     - defined_on: SELF
       operator: ALL
       symptoms:

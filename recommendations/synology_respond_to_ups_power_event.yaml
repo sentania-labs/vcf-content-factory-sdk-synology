@@ -1,6 +1,6 @@
 name: "[VCF Content Factory] Synology Respond To UPS Power Event"
 description: |
-  The UPS attached to the DiskStation is running on battery, or its battery is low. Utility power is likely lost or unstable.
+  The UPS attached to the DiskStation reports usb_ups_status_battery (running on battery) or low_batt (battery low). Utility power is likely lost or unstable.
 
   Check mains power at the UPS and restore it if possible. Open DSM Control Panel, go to Hardware and Power, then UPS, and confirm the UPS is detected and the battery charge.
 

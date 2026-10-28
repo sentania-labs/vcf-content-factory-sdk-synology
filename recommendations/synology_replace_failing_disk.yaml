@@ -1,6 +1,6 @@
 name: "[VCF Content Factory] Synology Replace Failing Disk"
 description: |
-  The DiskStation reports a disk with a SMART status that is not normal, or with uncorrectable sectors that keep increasing. Either one means the disk is on its way out.
+  The DiskStation reports a disk with a failing SMART status (failing, degraded or access_err), or with uncorrectable sectors that keep increasing. Either one means the disk is on its way out.
 
   Open DSM Storage Manager, go to HDD/SSD, and check the SMART details and the health status of the named disk. Run an extended SMART test if one has not run recently.
 

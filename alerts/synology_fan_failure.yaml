@@ -1,6 +1,6 @@
 name: "[VCF Content Factory] Synology Fan Failure"
 description: >
-  Fires when the DiskStation reports a failed fan.
+  Fires when DSM System Health reports a failed fan. This is a partial signal, because DSM returns only its top-ranked problem.
 adapter_kind: synology_diskstation
 resource_kind: SynologyDiskstation
 type: 17

@@ -1,6 +1,6 @@
 name: "[VCF Content Factory] Synology Expansion Unit Lost"
 description: >
-  Fires when DSM reports a lost expansion unit (critical) or an incompatible expansion unit (warning). Desktop models without an expansion unit never fire.
+  Fires when DSM reports space affected by a lost expansion unit while the storage verdict is Critical (DSM only treats the lost-expansion-unit flag as meaningful together with storage status danger), or when DSM reports an incompatible expansion unit (warning). Desktop models without an expansion unit never fire.
 adapter_kind: synology_diskstation
 resource_kind: SynologyDiskstation
 type: 18
@@ -17,6 +17,7 @@ symptom_sets:
       operator: ALL
       symptoms:
         - name: "[VCF Content Factory] Synology Expansion Unit Lost"
+        - name: "[VCF Content Factory] Synology Storage Critical"
     - defined_on: SELF
       operator: ALL
       symptoms:

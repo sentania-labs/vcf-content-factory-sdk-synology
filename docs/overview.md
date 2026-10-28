@@ -108,9 +108,11 @@ normally — collection is never failed over the optional cross-link.
   throws and marks the resource ERROR rather than publishing `0.0`
   sentinels on a GREEN instance. A snapshot refresh failure propagates —
   the adapter never registers a silent zero-resource cycle.
-- **Secrets are redacted from logs and errors.** The DSM `entry.cgi` URL
-  carries the `_sid` session token on every call and `account=`/`passwd=`
-  on login; these are masked in all thrown/logged messages while the
+- **Secrets stay out of URLs, logs and errors.** Since build 35 the login
+  and every DSM call are form POSTs to `entry.cgi`: `account=`/`passwd=` on
+  login and the `_sid` session token on every call travel in the request
+  body, never in the URL, so DSM's web server log and any proxy log never
+  see them. They are also masked in all thrown/logged messages while the
   failing endpoint stays identifiable.
 - **Fresh-instance discovery works on VCF Ops 9.0.2.** The adapter
   enumerates its storage tree on the collect path

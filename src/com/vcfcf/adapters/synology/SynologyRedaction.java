@@ -20,9 +20,12 @@ final class SynologyRedaction {
 	/**
 	 * Masks secret-bearing query parameters before a path, query string or
 	 * exception message can reach the adapter log or a Test Connection
-	 * error. The DSM entry.cgi URL carries the session id ({@code _sid}) on
+	 * error. The DSM request (a form body since build 35, issue #16; the
+	 * URL before) carries the session id ({@code _sid}) on
 	 * every authenticated call and, on the login call, the URL-encoded
-	 * plaintext password and account ({@code passwd=}, {@code account=}).
+	 * plaintext password and account ({@code passwd=}, {@code account=});
+	 * the same patterns mask the body, and a {@code Cookie:} header's
+	 * {@code id} value is masked too.
 	 * Build 32 (issue #27): also the Suite API shapes ({@code password=},
 	 * {@code username=}, {@code user=}, {@code token=} and
 	 * {@code principal=} parameters, URL userinfo, JSON {@code username},
@@ -42,6 +45,11 @@ final class SynologyRedaction {
 				.replaceAll("(?i)(_sid=)[^&]*", "$1<redacted>")
 				.replaceAll("(?i)(passwd=)[^&]*", "$1<redacted>")
 				.replaceAll("(?i)(account=)[^&]*", "$1<redacted>")
+				// Build 35 (issue #16): DSM also takes the session as the id
+				// cookie; a Cookie header's id value is masked up to the next
+				// ; or whitespace (the adapter sends _sid in the body, not the
+				// cookie, but a header dump must not leak it either).
+				.replaceAll("(?i)(Cookie:[^\\r\\n]*?\\bid=)[^;\\s]*", "$1<redacted>")
 				// Build 32 (issue #27): Suite API shapes. A form or query
 				// password, user, token or principal (the framework Suite API
 				// client ends its 401 and token messages in principal=<user>),

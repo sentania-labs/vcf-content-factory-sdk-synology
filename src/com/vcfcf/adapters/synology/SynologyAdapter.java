@@ -1005,7 +1005,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			metric(out, "NFS|nfs_total_ops", nfsRow.get("total_OPS").asDouble());
 			metric(out, "NFS|nfs_read_ops", nfsRow.get("read_OPS").asDouble());
 			metric(out, "NFS|nfs_write_ops", nfsRow.get("write_OPS").asDouble());
-			metric(out, "NFS|nfs_max_latency", nfsRow.get("total_max_latency").asDouble());
+			// Build 35 (issue #42): DSM sends microseconds; published in ms,
+			// and skipped when absent. See SynologyMetrics.microsToMillis.
+			metricIfPresent(out, "NFS|nfs_max_latency",
+					SynologyMetrics.nfsMaxLatency(SJ, nfsRow));
 		}
 
 		if (s.isRead(SnapshotReads.CONNECTIONS)) {
@@ -1216,7 +1219,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			metric(out, "IO|read_throughput", io.get("read_throughput").asDouble());
 			metric(out, "IO|write_throughput", io.get("write_throughput").asDouble());
 			// Build 32 (issue #34): DSM's fields are read_avg_latency and
-			// write_avg_latency; skipped when absent. See SynologyMetrics.
+			// write_avg_latency; skipped when absent. Build 35 (issue #42):
+			// DSM sends microseconds, published in ms. See SynologyMetrics.
 			metricIfPresent(out, "IO|read_latency", SynologyMetrics.lunLatency(
 					SJ, io, "read_avg_latency", "read_latency"));
 			metricIfPresent(out, "IO|write_latency", SynologyMetrics.lunLatency(

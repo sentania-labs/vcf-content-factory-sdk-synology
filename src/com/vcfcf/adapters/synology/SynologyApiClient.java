@@ -9,8 +9,13 @@ import java.io.IOException;
 import java.net.http.HttpResponse;
 
 /**
- * Wraps the Synology DSM Web API. All calls go to /webapi/entry.cgi
- * differentiated by query parameters. Session auth via _sid query param.
+ * Wraps the Synology DSM Web API. Every call but SYNO.API.Info is a POST to
+ * /webapi/&lt;cgi&gt; (entry.cgi, or the path SYNO.API.Info names) with api,
+ * version, method and parameters in an application/x-www-form-urlencoded
+ * body. Session auth via {@code _sid} in that body (build 35, issue #16:
+ * before, the login's account and password and every call's {@code _sid}
+ * rode in the GET query string, where DSM's or a proxy's access log could
+ * keep them; see {@link DsmRequest}).
  *
  * <p>v2: the logger is the framework instance logger supplied via
  * {@code VcfCfAdapter.componentLogger(SynologyApiClient.class)} — a
@@ -19,12 +24,13 @@ import java.net.http.HttpResponse;
  * (its records do not reach the adapter log) and never shadow the framework
  * {@code adapterLogger()}.
  *
- * FRAMEWORK NOTE: Synology uses _sid as a query parameter, not a cookie.
- * The framework's SessionCookieAuth adds a Cookie header, which DSM may
- * also accept, but the documented mechanism is the query param. This
- * client manages the session ID directly rather than using the framework's
- * auth strategies. This is a framework gap: a QueryParamAuth strategy
- * should be added for APIs that authenticate via query parameters.
+ * FRAMEWORK NOTE: this client manages the session id itself and uses the
+ * framework's {@link ManagedHttpClient#post} with no auth strategy. DSM also
+ * accepts the session as the {@code id} cookie (checked live, build 35), but
+ * the framework's cookie strategy (SessionCookieAuth) is client-wide and
+ * re-authenticates on HTTP 401/403, while DSM reports an expired session as
+ * error 106/107/119 in a 200 body, which {@link #call} already handles; the
+ * {@code _sid} body parameter keeps login, re-login and logout in one place.
  */
 public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson> {
 
@@ -97,12 +103,14 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 		if (!apiInfoAsked) {
 			loadApiInfo();
 		}
-		String path = synoUrl(DsmApis.AUTH, 7, "login",
+		// Build 35 (issue #16): a form POST, so the account and password
+		// travel in the body, never in the URL.
+		DsmRequest req = dsmRequest(DsmApis.AUTH, 7, "login",
 				"account=" + urlEncode(username),
 				"passwd=" + urlEncode(password),
 				"session=" + urlEncode(sessionName),
 				"format=sid");
-		SimpleJson resp = callRaw(path, "SYNO.API.Auth login");
+		SimpleJson resp = callRaw(req, "SYNO.API.Auth login");
 		if (!resp.isSuccess()) {
 			int code = (int) resp.get("error").get("code").asLong();
 			// Build 31 (issue #12): typed, so an authentication-class refusal
@@ -135,7 +143,7 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 		DsmApis.Load found;
 		try {
 			found = apis.load(SynologyAdapter.SJ,
-					callRaw(DsmApis.INFO_PATH, "SYNO.API.Info query"));
+					callRaw(DsmRequest.get(DsmApis.INFO_PATH), "SYNO.API.Info query"));
 		} catch (InterruptedException ie) {
 			throw ie;
 		} catch (Exception e) {
@@ -192,16 +200,17 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	private void sendLogout(String sid) {
 		try {
 			// Build 32 (issue #23): this client's own session name, and its
-			// _sid (synoUrl adds it), so only this client's session ends.
-			callRaw(logoutHttp, synoUrl(sid, apis.pick(DsmApis.AUTH, 7),
+			// _sid (DsmRequest.post adds it, in the body since build 35), so
+			// only this client's session ends.
+			callRaw(logoutHttp, DsmRequest.post(sid, apis.pick(DsmApis.AUTH, 7),
 					DsmApis.AUTH, "logout", "session=" + urlEncode(sessionName)),
 					"SYNO.API.Auth logout");
 		} catch (InterruptedException ie) {
 			Thread.currentThread().interrupt();
 			log.warn("Logout interrupted (non-fatal)");
 		} catch (Exception e) {
-			// e.getMessage() may carry the request URL (with _sid) if the
-			// underlying transport embeds it; redact before it reaches the log.
+			// Defense in depth: the URL no longer carries _sid (build 35),
+			// but the message is redacted before it reaches the log anyway.
 			log.warn("Logout failed (non-fatal): " + redact(String.valueOf(e.getMessage())));
 		}
 	}
@@ -296,14 +305,14 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 			throws IOException, InterruptedException {
 		ensureSession();
 		String endpoint = api + " " + method;
-		SimpleJson resp = callRaw(synoUrl(api, version, method, extra), endpoint);
+		SimpleJson resp = callRaw(dsmRequest(api, version, method, extra), endpoint);
 		if (!resp.isSuccess()) {
 			int code = (int) resp.get("error").get("code").asLong();
 			if (code == 106 || code == 107 || code == 119) {
 				log.info("Session expired (code=" + code + "), re-authenticating...");
 				invalidateSession();
 				login();
-				resp = callRaw(synoUrl(api, version, method, extra), endpoint);
+				resp = callRaw(dsmRequest(api, version, method, extra), endpoint);
 			}
 			if (!resp.isSuccess()) {
 				// Build 31 (review W4): typed with the data API's DSM error
@@ -319,31 +328,36 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	}
 
 	/**
-	 * Issue a raw GET. The {@code endpoint} label ({@code api + " " + method}) is
-	 * the ONLY request context allowed into a thrown message — never {@code path}.
+	 * Issue a raw request: a form POST, or a GET for {@code SYNO.API.Info}.
+	 * The {@code endpoint} label ({@code api + " " + method}) is the ONLY
+	 * request context allowed into a thrown message — never the path or body.
 	 *
-	 * <p>DEF-001: the DSM {@code entry.cgi} URL carries {@code _sid} on every
+	 * <p>DEF-001: the request body carries {@code _sid} on every
 	 * authenticated call and the URL-encoded plaintext {@code passwd}/{@code account}
-	 * on login. The framework logs exception messages to the on-disk adapter log
-	 * and surfaces them on Test-connection, so a message built from the path would
-	 * land secrets on disk ({@code rules/no-secrets-on-disk.md}). The endpoint label
-	 * identifies the failing API without any query string.
+	 * on login (build 35, issue #16: in the body, no longer in the URL). The
+	 * framework logs exception messages to the on-disk adapter log and surfaces
+	 * them on Test-connection, so a message built from the request would land
+	 * secrets on disk ({@code rules/no-secrets-on-disk.md}). The endpoint label
+	 * identifies the failing API without any parameter.
 	 */
-	private SimpleJson callRaw(String path, String endpoint)
+	private SimpleJson callRaw(DsmRequest req, String endpoint)
 			throws IOException, InterruptedException {
-		return callRaw(http, path, endpoint);
+		return callRaw(http, req, endpoint);
 	}
 
-	private SimpleJson callRaw(ManagedHttpClient via, String path,
+	private SimpleJson callRaw(ManagedHttpClient via, DsmRequest req,
 			String endpoint) throws IOException, InterruptedException {
 		HttpResponse<String> resp;
 		try {
-			resp = via.get(path, HttpResponse.BodyHandlers.ofString());
+			resp = req.body == null
+					? via.get(req.path, HttpResponse.BodyHandlers.ofString())
+					: via.post(req.path, req.body, DsmRequest.FORM,
+							HttpResponse.BodyHandlers.ofString());
 		} catch (IOException | RuntimeException e) {
 			// DEF-001: a transport failure (connect/SSL/timeout) can throw BEFORE
-			// any response, and the underlying message may embed the request URI —
-			// which on login carries account=/passwd=<plaintext> and on every
-			// authenticated call carries _sid=. Rethrow a standalone message built
+			// any response, and the underlying message may embed the request URI.
+			// Since build 35 (issue #16) the URI carries no account=, passwd= or
+			// _sid= (they are in the body), but the guard stays. Rethrow a standalone message built
 			// from the endpoint label only; redact any message text and DO NOT chain
 			// the raw cause (a chained cause re-exposes getCause().getMessage() to
 			// the framework logger). See rules/no-secrets-on-disk.md.
@@ -363,8 +377,9 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	}
 
 	/**
-	 * Mask secret-bearing query parameters before a path/query string can reach
-	 * the adapter log or a Test-connection error. The DSM entry.cgi URL carries
+	 * Mask secret-bearing parameters before a path, query string or form body
+	 * can reach the adapter log or a Test-connection error. The DSM request
+	 * body (the URL before build 35) carries
 	 * the session id ({@code _sid}) on every authenticated call and, on the login
 	 * call, the URL-encoded plaintext password and account ({@code passwd=},
 	 * {@code account=}). Any of those must never land on disk
@@ -377,40 +392,16 @@ public final class SynologyApiClient implements SnapshotReads.Source<SimpleJson>
 	}
 
 	/**
-	 * Build 32 (issue #31): {@code version} is the desired version; the URL
-	 * carries {@code min(maxVersion, version)} on DSM's CGI path once
-	 * SYNO.API.Info was read ({@link DsmApis#pick}).
+	 * Build 32 (issue #31): {@code version} is the desired version; the
+	 * request carries {@code min(maxVersion, version)} on DSM's CGI path once
+	 * SYNO.API.Info was read ({@link DsmApis#pick}). Build 35 (issue #16): a
+	 * form POST with this client's {@code _sid} in the body.
 	 */
-	private String synoUrl(String api, int version, String method, String... extra) {
-		return synoUrl(session.sid(), apis.pick(api, version), api, method, extra);
-	}
-
-	private static String synoUrl(String sid, DsmApis.Pick pick, String api,
-			String method, String... extra) {
-		StringBuilder sb = new StringBuilder("/webapi/").append(pick.cgi).append("?api=");
-		sb.append(api).append("&version=").append(pick.version).append("&method=").append(method);
-		if (sid != null) {
-			sb.append("&_sid=").append(sid);
-		}
-		for (String param : extra) {
-			sb.append("&").append(param);
-		}
-		return sb.toString();
+	private DsmRequest dsmRequest(String api, int version, String method, String... extra) {
+		return DsmRequest.post(session.sid(), apis.pick(api, version), api, method, extra);
 	}
 
 	private static String urlEncode(String s) {
-		if (s == null) return "";
-		StringBuilder sb = new StringBuilder();
-		for (char c : s.toCharArray()) {
-			if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-					(c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {
-				sb.append(c);
-			} else {
-				for (byte b : String.valueOf(c).getBytes(java.nio.charset.StandardCharsets.UTF_8)) {
-					sb.append(String.format("%%%02X", b & 0xFF));
-				}
-			}
-		}
-		return sb.toString();
+		return DsmRequest.urlEncode(s);
 	}
 }

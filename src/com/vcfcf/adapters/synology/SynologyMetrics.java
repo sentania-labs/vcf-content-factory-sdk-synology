@@ -246,12 +246,43 @@ final class SynologyMetrics {
 	 * {@code write_latency}, which DSM does not send, and published 0. The
 	 * old names are still read if present.
 	 *
+	 * <p>Build 35 (issue #42): in milliseconds. DSM sends microseconds; see
+	 * {@link #microsToMillis}. Before build 35 the value was published as
+	 * sent under the declared unit ms, 1000 times too large. The legacy
+	 * names (never seen on DSM 7) are scaled the same way.
+	 *
 	 * @param avgKey    {@code read_avg_latency} or {@code write_avg_latency}
 	 * @param legacyKey {@code read_latency} or {@code write_latency}
 	 */
 	static <J> Double lunLatency(SynologyTopology.Json<J> js, J io,
 			String avgKey, String legacyKey) {
 		Double v = num(js, js.get(io, avgKey));
-		return v != null ? v : num(js, js.get(io, legacyKey));
+		return microsToMillis(v != null ? v : num(js, js.get(io, legacyKey)));
+	}
+
+	/**
+	 * Build 35 (issue #42): the DiskStation's NFS worst latency
+	 * ({@code SYNO.Core.System.Utilization} {@code nfs[0].total_max_latency})
+	 * in milliseconds, or {@code null} when DSM does not send it (before
+	 * build 35 a missing field was published as 0, and a present one 1000
+	 * times too large).
+	 */
+	static <J> Double nfsMaxLatency(SynologyTopology.Json<J> js, J nfsRow) {
+		return microsToMillis(num(js, js.get(nfsRow, "total_max_latency")));
+	}
+
+	/**
+	 * Build 35 (issue #42): DSM's {@code SYNO.Core.System.Utilization}
+	 * latencies are microseconds. Evidence (DSM 7.3.2, DS1520+,
+	 * 2026-10-28): DSM's own Resource Monitor (webman/modules/ResourceMonitor/
+	 * resource.js) charts the LUN {@code read_avg_latency},
+	 * {@code write_avg_latency} and {@code total_io_latency} and the NFS
+	 * {@code *_max_latency} fields with data type {@code timeus}, whose
+	 * formatter shows a value under 1000 as "us" and divides by 1000 for
+	 * "ms". Published in ms, the unit the vSphere adapter uses for its
+	 * latency metrics.
+	 */
+	static Double microsToMillis(Double us) {
+		return us == null ? null : us / 1000.0;
 	}
 }

@@ -14,7 +14,7 @@ trap 'rm -rf "$out"' EXIT
 javac -d "$out" -sourcepath src:tests \
     tests/com/vcfcf/adapters/synology/*.java
 for t in AllowInsecureTest SnapshotCacheTest SnapshotTimingTest \
-        FailureMappingTest SnapshotReadsTest SnapshotIsolationTest NfsProbesTest \
+        FailureMappingTest SnapshotReadsTest SnapshotIsolationTest NfsProbesTest DsmRequestTest \
         DsmSessionTest TeardownTest TopologyTest DeviceIdentityTest RedactionTest SessionNameTest MetricsTest CacheJoinTest DatastoreIndexTest DsmApisTest; do
     java -cp "$out" "com.vcfcf.adapters.synology.$t"
 done

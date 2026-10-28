@@ -4,6 +4,8 @@
 - W1 (issue #20): collectNfsExport fails an existing export while the NFS
   service is off, before it publishes anything, and the snapshot sets
   nfsDisabled only from NfsProbes.serviceOff.
+- Build 35 (issue #16): the login and every authenticated call are form
+  POSTs; only SYNO.API.Info is a GET.
 - W3 (issue #17, DEF-001): both callRaw overloads route IOException and
   RuntimeException through SynologyRedaction.transportFailure, and no
   other catch of the HTTP call exists.
@@ -46,9 +48,22 @@ def main():
     assert "throw SynologyRedaction.transportFailure(endpoint, e);" in raw, \
         "callRaw does not rethrow through SynologyRedaction.transportFailure"
     assert raw.count("catch (") == 1, "callRaw has another catch around the HTTP call"
-    short = body(CLIENT, r"private SimpleJson callRaw\(String path, String endpoint\)")
-    assert "return callRaw(http, path, endpoint);" in short, \
+    short = body(CLIENT, r"private SimpleJson callRaw\(DsmRequest req, String endpoint\)")
+    assert "return callRaw(http, req, endpoint);" in short, \
         "the short callRaw overload does not delegate"
+    # Build 35 (issue #16): a request with a body is a form POST; only the
+    # bodiless SYNO.API.Info request is a GET, and no URL carries _sid,
+    # account or passwd.
+    assert re.search(r"req\.body == null\s*\?\s*via\.get\(req\.path,", raw) and \
+        re.search(r"via\.post\(req\.path, req\.body, DsmRequest\.FORM,", raw), \
+        "callRaw does not POST the form body"
+    assert CLIENT.count("DsmRequest.get(") == 1 and \
+        "DsmRequest.get(DsmApis.INFO_PATH)" in CLIENT, \
+        "a GET other than SYNO.API.Info is back"
+    assert "synoUrl" not in CLIENT and "&_sid=" not in CLIENT and "?api=" not in CLIENT, \
+        "a query-string request builder is back in the client"
+    login = body(CLIENT, r"private String sendLogin\(\)")
+    assert "dsmRequest(DsmApis.AUTH, 7, \"login\"" in login, "login is not a form POST"
     # Round 2 R13 (issue #28, review N3): duplicate rows are skipped before
     # they are counted or indexed.
     load = body(STITCHER, r"public int loadDatastores\(\)")

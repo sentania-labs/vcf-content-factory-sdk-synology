@@ -133,8 +133,11 @@ an administrators-group account (see above).
 > **Session note:** the adapter manages its own DSM session. It logs in to
 > obtain a `_sid` session token, passes `_sid` on every Web API call, and
 > re-authenticates automatically when DSM reports the session expired (DSM
-> error 106 / 107 / 119). The `_sid` value is redacted from all logs and
-> error messages.
+> error 106 / 107 / 119). Since build 35 the login and every call are HTTPS
+> POSTs with the account, password and `_sid` in the request body, never in
+> the URL, so they do not land in DSM's web server access log or a proxy's
+> (only the session-less `SYNO.API.Info` query is a GET). The `_sid` value
+> is redacted from all logs and error messages.
 
 ## Network Requirements
 
@@ -250,6 +253,10 @@ NFS export, UPS and World objects once (they are now identified by the
 DiskStation's serial number), and history on the old objects does not carry
 over. See [Upgrading](../README.md#upgrading) for what changes and how to
 delete the old objects.
+
+Upgrading to build 35 divides iSCSI LUN read/write latency and the
+DiskStation's NFS max latency by 1000 (DSM sends microseconds; the metrics
+are declared in ms). See [Upgrading](../README.md#upgrading).
 
 ## Troubleshooting
 

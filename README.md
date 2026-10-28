@@ -78,6 +78,19 @@ Discovery runs immediately. Metrics begin collecting on the next 5-minute cycle.
 
 ## Upgrading
 
+### To build 35: LUN and NFS latency drop by a factor of 1000
+
+DSM reports iSCSI LUN `read_avg_latency` / `write_avg_latency` and NFS
+`total_max_latency` in microseconds (its own Resource Monitor shows 2188 as
+"2.2 ms"), and earlier builds published them as sent under the unit ms
+(LUN latency since build 32, NFS max latency in every release). From
+build 35 the adapter divides by 1000 (issue #42), so iSCSI LUN `IO|read_latency`
+and `IO|write_latency` and DiskStation `NFS|nfs_max_latency` are real
+milliseconds. Charts spanning the upgrade show a step down, and any
+symptom, view or super metric threshold on these keys needs re-checking.
+Key names and units are unchanged. NFS max latency is now skipped, not
+published as 0, when DSM does not send it.
+
 ### To build 34 (from 1.0.0.30, 0.0.0.33 or earlier): Synology objects are re-created once
 
 Build 34 fixes two or more NASes writing into the same objects (issue #11):

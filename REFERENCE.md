@@ -141,6 +141,16 @@ before the upgrade is 100 times the real load.
 | `nfs_max_latency` | NFS Max Latency | metric | ms | yes |
 | `nfs_client_count` | NFS Client Count | metric | — | yes |
 
+`nfs_max_latency` is DSM's worst NFS latency in the sample
+(`SYNO.Core.System.Utilization` `nfs[0].total_max_latency`). DSM reports it
+in microseconds; since build 0.0.0.35 (issue #42) the adapter divides by
+1000 and publishes milliseconds, the unit the vSphere adapter uses for its
+latency metrics, so DSM's 54993 is published as 54.993. It is skipped when
+DSM does not send it (before build 35, published as 0). Every build before
+0.0.0.35, including v1.0.0.30 and earlier releases, published DSM's value
+as sent under the declared unit ms, so history before the upgrade is 1000
+times the real latency.
+
 ---
 
 ### Synology Storage Pool
@@ -263,6 +273,15 @@ before the upgrade is 100 times the real load.
 | `write_throughput` | Write Throughput | metric | bytes/s | yes |
 | `read_latency` | Read Latency | metric | ms | yes |
 | `write_latency` | Write Latency | metric | ms | yes |
+
+`read_latency` and `write_latency` are DSM's `read_avg_latency` and
+`write_avg_latency` from `SYNO.Core.System.Utilization` `lun[]`. DSM reports
+them in microseconds: its own Resource Monitor charts these fields as
+microseconds and shows 2188 as "2.2 ms". Since build 0.0.0.35 (issue #42)
+the adapter divides by 1000 and publishes milliseconds (the vSphere
+adapter's `virtualDisk|totalReadLatency_average` convention), so 2188 is
+published as 2.188. Builds 0.0.0.32 to 0.0.0.34 published DSM's value as
+sent, 1000 times too large; earlier builds published 0.
 
 #### Configuration
 

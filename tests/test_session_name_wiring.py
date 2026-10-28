@@ -3,8 +3,9 @@
 
 SessionNameTest proves the names; this pins the wiring, which needs the
 framework jar to run: no shared constant remains, configure passes the
-instance id, Test Connection passes test=true, and the logout URL is built
-with this client's sid and its own session name. Stdlib only.
+instance id, Test Connection passes test=true, and the logout request is
+built with this client's sid and its own session name (a form body since
+build 35). Stdlib only.
 """
 import pathlib
 import re
@@ -23,7 +24,7 @@ def main():
     m = re.search(r"private void sendLogout\(String sid\)\s*\{(.*?)\n\t\}", CLIENT, re.S)
     assert m, "sendLogout not found"
     body = m.group(1)
-    assert re.search(r"synoUrl\(sid,", body), "logout does not pass this client's _sid"
+    assert re.search(r"DsmRequest\.post\(sid,", body), "logout does not pass this client's _sid"
     assert "urlEncode(sessionName)" in body.replace("\n", " "), "logout session name"
     assert "urlEncode(sessionName)" in body, "logout does not name this client's session"
     assert re.search(r"sessionName\(instanceId,\s*false,", ADAPTER), \

@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology SSD Cache Status Not Normal"
+adapter_kind: synology_diskstation
+resource_kind: SynologySsdCache
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Configuration|status
+  operator: NOT_EQ
+  value: "normal"
+
+description: >
+  Triggers when an SSD cache status (Configuration|status) is anything other than normal.

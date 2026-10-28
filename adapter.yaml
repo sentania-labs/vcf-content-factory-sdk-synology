@@ -33,3 +33,16 @@ cross_mp_edges:
       computed `<nas_ip>/<vol_path>/<share>` path per connected NAS
       interface); additive parentForeign edge via Suite API, deduped so a
       single Datastore never gets the same export as a duplicate child.
+bundled_content:
+  symptoms:
+    - symptoms/synology_disk_smart_not_normal.yaml
+    - symptoms/synology_disk_unc_sectors_increasing.yaml
+    - symptoms/synology_fan_failed.yaml
+    - symptoms/synology_pool_status_not_normal.yaml
+    - symptoms/synology_ssd_cache_disk_failure.yaml
+    - symptoms/synology_ssd_cache_status_not_normal.yaml
+    - symptoms/synology_ups_low_battery.yaml
+    - symptoms/synology_ups_on_battery.yaml
+    - symptoms/synology_volume_status_not_normal.yaml
+    - symptoms/synology_volume_usage_critical.yaml
+    - symptoms/synology_volume_usage_warning.yaml

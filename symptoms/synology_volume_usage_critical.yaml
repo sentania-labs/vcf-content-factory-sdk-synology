@@ -1,0 +1,16 @@
+name: "[VCF Content Factory] Synology Volume Usage Critical"
+adapter_kind: synology_diskstation
+resource_kind: SynologyVolume
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: metric_static
+  key: Capacity|usage_pct
+  operator: GT_EQ
+  value: 95
+  instanced: false
+
+description: >
+  Triggers when volume usage (Capacity|usage_pct) is at or above 95 percent.

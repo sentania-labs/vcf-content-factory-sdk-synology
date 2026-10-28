@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology UPS On Battery"
+adapter_kind: synology_diskstation
+resource_kind: SynologyUps
+severity: WARNING
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Status|status
+  operator: CONTAINS
+  value: "OB"
+
+description: >
+  Triggers when the UPS NUT status (Status|status) contains OB (on battery), meaning mains power was lost.

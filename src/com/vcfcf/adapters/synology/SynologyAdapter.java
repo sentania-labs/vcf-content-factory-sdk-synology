@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Synology DiskStation adapter — framework v2 (build 14).
@@ -100,6 +101,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 */
 	private volatile SuiteApiStitcher suiteStitcher;
 	private volatile SynologyStitcher stitcher;
+
+	/**
+	 * Build 35 (buildkit 1.0.22): the kinds the last finished enumeration
+	 * read in full ({@link ReadKinds}) and its thread, or null while one runs
+	 * or after one threw. Volatile: a discovery pass may run on another
+	 * thread.
+	 */
+	private volatile ReadRecord lastRead;
 
 	/**
 	 * Per-cycle snapshot of the Synology API responses, shared across all
@@ -534,6 +543,44 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	}
 
 	/**
+	 * Build 35 (buildkit 1.0.22): the kinds this cycle's enumeration read in
+	 * full, so the framework counts a miss (and after
+	 * {@code notExistingMissedCycles()}, 12 by default, marks NOT_EXISTING)
+	 * only for those. The rule is {@link ReadKinds}: no NFS export when any
+	 * share's rule probe failed, no UPS, SSD cache, LUN or DiskStation when
+	 * its read failed (and no World without the DiskStation), no pool,
+	 * volume or disk unless storage {@code load_info} was complete.
+	 */
+	@Override
+	protected Set<String> kindsReadThisCycle() {
+		ReadRecord r = lastRead;
+		// Only this thread's enumeration speaks for this cycle: a discovery
+		// pass on another thread (getDiscoverer) never stands in for it.
+		return r != null && r.thread == Thread.currentThread() ? r.kinds : null;
+	}
+
+	/**
+	 * Build 35: nothing is excluded. The World is counted with the
+	 * DiskStation ({@link ReadKinds}), so the pre-build-34 World, which the
+	 * enumeration never delivers, is marked like the other legacy objects.
+	 */
+	@Override
+	protected Set<String> notExistingExcludedKinds() {
+		return ReadKinds.EXCLUDED;
+	}
+
+	/** Build 35: one enumeration's read kinds and the thread that ran it. */
+	private static final class ReadRecord {
+		final Thread thread;
+		final Set<String> kinds;
+
+		ReadRecord(Thread thread, Set<String> kinds) {
+			this.thread = thread;
+			this.kinds = kinds;
+		}
+	}
+
+	/**
 	 * Build 31 (issue #12): marks the start of a collection or discovery
 	 * pass in the current configuration's snapshot cache. A no-op before
 	 * the first configure.
@@ -567,6 +614,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	@Override
 	protected void enumerateResources(ResourceSink sink)
 			throws InterruptedException, Exception {
+		// Build 35 (buildkit 1.0.22): nothing is declared read until this
+		// enumeration has finished; a throw leaves null (nothing is marked).
+		lastRead = null;
+		ReadKinds read = new ReadKinds();
 		Snapshot s = currentSnapshot();
 		// Build 34 (issue #11): every object below the DiskStation, and the
 		// World, carries the DiskStation identity as a second identifying
@@ -574,6 +625,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		final String dev = s.device.value;
 
 		// World: one per DiskStation (build 34; it was one shared object).
+		// Build 35: registered first and unconditionally, so whenever
+		// ReadKinds names the World kind (with the DiskStation) this World
+		// was delivered; only the pre-build-34 World takes a miss.
 		sink.accept(rcOf("SynologyWorld", s.device.worldName(),
 				"world_id", "synology_world", dev));
 
@@ -581,55 +635,157 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		String model = s.dsmInfo.data().get("model").asString("");
 		sink.accept(rcOf(DeviceIdentity.DISKSTATION_KIND,
 				s.device.diskstationName(model), "serial", dev, null));
+		read.systemHealth(s.isRead(SnapshotReads.SYSTEM_HEALTH));
 
 		SimpleJson storage = s.storage;
 		int pools = 0, volumes = 0, disks = 0, caches = 0, luns = 0, exports = 0;
+		// Build 35: records with no identity, counted for ReadKinds.
+		int storageNoId = 0, cachesNoId = 0, lunsNoUuid = 0, sharesNoName = 0;
 
 		for (SimpleJson pool : storage.data().get("storagePools").asList()) {
+			String poolId = pool.get("id").asString();
+			if (ReadKinds.noId(poolId)) storageNoId++;
 			sink.accept(rcOf("SynologyStoragePool", poolDisplayName(pool),
-					"pool_id", pool.get("id").asString(), dev));
+					"pool_id", poolId, dev));
 			pools++;
 		}
 		for (SimpleJson vol : storage.data().get("volumes").asList()) {
 			String volPath = vol.get("vol_path").asString();
+			String volId = vol.get("volume_id").asString(volPath);
+			if (ReadKinds.noId(volId)) storageNoId++;
 			sink.accept(rcOf("SynologyVolume", volumeDisplayName(vol),
-					"volume_id", vol.get("volume_id").asString(volPath), dev));
+					"volume_id", volId, dev));
 			volumes++;
 		}
 		for (SimpleJson disk : storage.data().get("disks").asList()) {
 			String diskId = disk.get("id").asString();
+			if (ReadKinds.noId(diskId)) storageNoId++;
 			sink.accept(rcOf("SynologyDisk", disk.get("name").asString(diskId),
 					"disk_id", diskId, dev));
 			disks++;
 		}
+		// Build 35: an empty pool, volume or SSD cache list is complete only
+		// on positive evidence from the rest of load_info (ReadKinds).
+		List<String> poolIds = new ArrayList<>();
+		for (SimpleJson pool : storage.data().get("storagePools").asList()) {
+			poolIds.add(pool.get("id").asString(""));
+		}
+		List<String> diskUsedBy = new ArrayList<>();
+		for (SimpleJson disk : storage.data().get("disks").asList()) {
+			SimpleJson usedBy = disk.get("used_by");
+			// A missing used_by, or a list or object, is no evidence (null).
+			diskUsedBy.add(usedBy.isNull() || usedBy.isList() || usedBy.isObject()
+					? null : usedBy.asString());
+		}
+		SimpleJson sharedCaches = storage.data().get("sharedCaches");
+		List<String> sharedCacheIds = null;
+		if (sharedCaches.isList()) {
+			sharedCacheIds = new ArrayList<>();
+			for (SimpleJson sc : sharedCaches.asList()) {
+				sharedCacheIds.add(sc.get("id").asString(""));
+			}
+		}
+		// Review R3-B1: DSM's Storage Manager lists pools as storagePools
+		// plus missing_pools and detected_pools; a pool in either is not
+		// gone. Both must be sent as lists and be empty.
+		SimpleJson missingPools = storage.data().get("missing_pools");
+		SimpleJson detectedPools = storage.data().get("detected_pools");
+		int missingCount = missingPools.isList() ? missingPools.asList().size() : 0;
+		int detectedCount = detectedPools.isList() ? detectedPools.asList().size() : 0;
+		boolean noUnassembledPool = ReadKinds.noUnassembledPool(
+				missingPools.isList(), missingCount, detectedPools.isList(),
+				detectedCount);
+		read.unassembledPools(missingPools.isList(), missingCount,
+				detectedPools.isList(), detectedCount);
+		// Review R3-W1: a volume pointing at a pool or cache the lists
+		// omit, or a shared cache DSM reports missing.
+		List<String> cacheIds = new ArrayList<>();
+		for (SimpleJson cache : storage.data().get("ssdCaches").asList()) {
+			cacheIds.add(cache.get("id").asString(""));
+		}
+		boolean volumeCached = false;
+		boolean volumePoolUnlisted = false;
+		boolean volumeCacheUnlisted = false;
+		for (SimpleJson vol : storage.data().get("volumes").asList()) {
+			String volCacheId = vol.get("cache").get("id").asString();
+			if (!ReadKinds.noId(volCacheId)) {
+				volumeCached = true;
+				if (!cacheIds.contains(volCacheId)) volumeCacheUnlisted = true;
+			}
+			String poolPath = vol.get("pool_path").asString();
+			if (!ReadKinds.noId(poolPath) && !poolIds.contains(poolPath)) {
+				volumePoolUnlisted = true;
+			}
+		}
+		boolean sharedCacheMissing = false;
+		for (SimpleJson sc : sharedCaches.asList()) {
+			if (sc.get("is_missing").asBoolean()) sharedCacheMissing = true;
+		}
+		read.contradictions(volumePoolUnlisted, volumeCacheUnlisted,
+				sharedCacheMissing);
+		// Review R4-W1: a disk naming a pool no list carries, and DSM's
+		// expansion-unit flags (each only when DSM sent it).
+		read.disksNameUnlistedPool(StorageOverview.diskNamesUnlistedPool(
+				diskUsedBy, poolIds, sharedCacheIds, cacheIds));
+		SimpleJson overview = storage.data().get("overview_data");
+		SimpleJson eunitLost = overview.get("space_affect_by_eunit_lost");
+		SimpleJson eunitIncompatible = overview.get("incompatible_eunit");
+		read.expansionUnits(
+				StorageOverview.eunitLost(!eunitLost.isNull(), eunitLost.asString()),
+				StorageOverview.eunitIncompatible(!eunitIncompatible.isNull(),
+						eunitIncompatible.isList(), eunitIncompatible.size()));
+		read.storage(storage.data().get("storagePools").isList(),
+				storage.data().get("volumes").isList(),
+				storage.data().get("disks").isList(), pools, volumes, disks,
+				storageNoId, ReadKinds.noPoolConfigured(diskUsedBy, sharedCacheIds,
+						noUnassembledPool));
 		SimpleJson ssdCaches = storage.data().get("ssdCaches");
 		if (!ssdCaches.isNull()) {
 			for (SimpleJson cache : ssdCaches.asList()) {
+				String cacheId = cache.get("id").asString();
+				if (ReadKinds.noId(cacheId)) cachesNoId++;
 				sink.accept(rcOf("SynologySsdCache",
 						cacheDisplayName(cache, storage),
-						"cache_id", cache.get("id").asString(), dev));
+						"cache_id", cacheId, dev));
 				caches++;
 			}
 		}
+		read.ssdCaches(ssdCaches.isList(), caches, cachesNoId,
+				ReadKinds.noCacheConfigured(sharedCacheIds, diskUsedBy, poolIds,
+						volumeCached));
 
-		for (SimpleJson lun : s.lunList.data().get("luns").asList()) {
+		SimpleJson lunList = s.lunList.data().get("luns");
+		for (SimpleJson lun : lunList.asList()) {
 			String uuid = lun.get("uuid").asString();
+			if (ReadKinds.noId(uuid)) lunsNoUuid++;
 			sink.accept(rcOf("SynologyIscsiLun",
 					lun.get("name").asString(uuid), "lun_uuid", uuid, dev));
 			luns++;
 		}
+		read.luns(s.isRead(SnapshotReads.LUNS), lunList.isList(), luns,
+				lunsNoUuid);
 
 		// NFS exports: a share is an export iff the snapshot kept >0 NFS rules
 		// for it (nfsRulesByShare). Same gating as build 16's per-share probe,
 		// served from the snapshot — no re-probe.
-		for (SimpleJson share : s.shares.data().get("shares").asList()) {
+		SimpleJson shareList = s.shares.data().get("shares");
+		for (SimpleJson share : shareList.asList()) {
 			String name = share.get("name").asString();
+			if (ReadKinds.noId(name)) sharesNoName++;
 			if (s.nfsRulesByShare.containsKey(name)) {
 				sink.accept(rcOf("SynologyNfsExport", name, "share_name", name,
 						dev));
 				exports++;
 			}
 		}
+		// Build 35: one failed share probe leaves every export out. Review
+		// R3-N1: the share list pages; a total other than the rows
+		// returned is a partial list (an absent total is -1).
+		SimpleJson shareTotal = s.shares.data().get("total");
+		read.exports(s.isRead(SnapshotReads.SHARES), shareList.isList(),
+				shareList.isList() ? shareList.asList().size() : 0,
+				shareTotal.isNull() ? -1 : (int) shareTotal.asLong(),
+				sharesNoName, s.nfsDisabled, s.nfsProbeFailed.size(), exports);
 
 		// UPS (optional): present in the snapshot only when usb_ups_connect=true.
 		if (s.ups != null) {
@@ -637,12 +793,18 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			sink.accept(rcOf("SynologyUps", upsModel, "ups_model", upsModel,
 					dev));
 		}
+		SimpleJson upsAnswer = s.upsAnswer == null ? null : s.upsAnswer.data();
+		read.ups(upsAnswer != null,
+				upsAnswer != null && !upsAnswer.get("usb_ups_connect").isNull(),
+				s.ups != null,
+				s.ups != null && !ReadKinds.noId(s.ups.data().get("model").asString()));
 
 		logInfo("Synology enumerate (" + DeviceIdentity.ID_KEY + "=" + dev
 				+ "): 1 world, 1 diskstation, " + pools
 				+ " pools, " + volumes + " volumes, " + disks + " disks, "
 				+ caches + " ssd-caches, " + luns + " luns, " + exports
 				+ " nfs-exports");
+		lastRead = new ReadRecord(Thread.currentThread(), read.kinds());
 	}
 
 	private ResourceConfig rcOf(String kind, String name, String idKey,
@@ -918,6 +1080,43 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				System.currentTimeMillis(), value != null ? value : ""));
 	}
 
+	/**
+	 * Build 35 (review R4-W2): {@code overview_data.sample_level_str} as
+	 * level name to DSM's string, or {@code null} when DSM did not send it
+	 * (StorageOverview then uses the UI's defaults). A value that is not an
+	 * object maps nothing, so no level is published.
+	 */
+	static Map<String, String> levelNames(SimpleJson node) {
+		if (node.isNull()) return null;
+		Map<String, String> m = new HashMap<>();
+		if (!node.isObject()) return m;
+		for (String name : new String[] {StorageOverview.DANGER,
+				StorageOverview.ATTENTION, StorageOverview.NORMAL}) {
+			String v = SynologyMetrics.text(SJ, node.get(name));
+			if (v != null) m.put(name, v);
+		}
+		return m;
+	}
+
+	/**
+	 * Build 35 (review W1): publishes {@code value} unless it is {@code null}
+	 * (DSM did not send the field, or sent it blank), so a status that was
+	 * not read is never published as {@code ""}, which a "not normal"
+	 * symptom would read as a fault. Ops keeps the last value it had.
+	 */
+	private static void propIfPresent(List<MetricData> out, String key,
+			String value) {
+		if (value != null) {
+			prop(out, key, value);
+		}
+	}
+
+	/** Build 35 (review W1): DSM's text field, present-only; see {@link #propIfPresent}. */
+	private static void textIfPresent(List<MetricData> out, String key,
+			SimpleJson node) {
+		propIfPresent(out, key, SynologyMetrics.text(SJ, node));
+	}
+
 	// -----------------------------------------------------------------------
 	// Per-kind collectors (value semantics preserved from v1)
 	// -----------------------------------------------------------------------
@@ -990,9 +1189,61 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		}
 
 		if (s.isRead(SnapshotReads.FAN)) {
+			// Build 35 (review B2): cool_fan is which fan speed modes the
+			// model offers ("no", "single", "yes"), not fan health; key kept,
+			// display name now "Fan Mode Support". Fan health is Fan|fan_health.
 			prop(out, "Fan|fan_status", fan.data().get("cool_fan").asString("unknown"));
 			prop(out, "Fan|fan_speed_mode", fan.data().get("dual_fan_speed").asString("unknown"));
 		}
+
+		// Build 35 (review B2): DSM's System Health widget verdict and the fan
+		// health derived from it; each key skipped when DSM did not send it.
+		// See SystemHealth.
+		if (s.isRead(SnapshotReads.SYSTEM_HEALTH)) {
+			SimpleJson rule = s.systemHealth.data().get("rule");
+			propIfPresent(out, "Health|system_health", SystemHealth.level(SJ, rule));
+			propIfPresent(out, "Health|system_health_rule", SystemHealth.ruleId(SJ, rule));
+			propIfPresent(out, "Health|system_health_message", SystemHealth.message(SJ, rule));
+			propIfPresent(out, "Fan|fan_health", SystemHealth.fanHealth(SJ, rule));
+		}
+
+		// Build 35 (review R4-W2): DSM Storage Manager's own storage verdict
+		// (the Overview health card), the expansion-unit flags and DSM's
+		// missing and detected pool lists, so a pool that left storagePools
+		// is visible on the DiskStation; each key skipped when DSM did not
+		// send it. See StorageOverview.
+		SimpleJson storageData = s.storage.data();
+		SimpleJson overview = storageData.get("overview_data");
+		SimpleJson statusLevel = overview.get("status_level");
+		propIfPresent(out, "Health|storage_status_level",
+				SynologyMetrics.text(SJ, statusLevel));
+		String storageLevel = StorageOverview.level(statusLevel.asString(),
+				levelNames(overview.get("sample_level_str")));
+		propIfPresent(out, "Health|storage_status", storageLevel);
+		propIfPresent(out, "Health|expansion_unit_lost", StorageOverview.flag(
+				overview.get("space_affect_by_eunit_lost").asString()));
+		SimpleJson incompatible = overview.get("incompatible_eunit");
+		propIfPresent(out, "Health|incompatible_expansion_units",
+				StorageOverview.count(incompatible.isList(), incompatible.size()));
+		SimpleJson missingPools = storageData.get("missing_pools");
+		propIfPresent(out, "Health|missing_pools",
+				StorageOverview.count(missingPools.isList(), missingPools.size()));
+		SimpleJson detectedPools = storageData.get("detected_pools");
+		propIfPresent(out, "Health|detected_pools",
+				StorageOverview.count(detectedPools.isList(), detectedPools.size()));
+		SimpleJson sysStatus = storageData.get("env").get("status");
+		propIfPresent(out, "Health|system_partition_crashed", StorageOverview.flag(
+				sysStatus.get("system_crashed").asString()));
+		// Review R5-N3: DSM's "repair system partition" prompt as Storage
+		// Manager shows it (showRepairSysPartition).
+		propIfPresent(out, "Health|system_partition_needs_repair",
+				StorageOverview.systemPartitionNeedsRepair(
+						sysStatus.get("system_need_repair").asString(),
+						sysStatus.get("rootbackup_need_repair").asString(),
+						sysStatus.get("system_crashed").asString(),
+						sysStatus.get("system_rebuilding").asString(),
+						sysStatus.get("rootbackup_rebuilding").asString(),
+						storageLevel));
 
 		if (s.isRead(SnapshotReads.NFS_SERVICE)) {
 			prop(out, "NFS|nfs_enabled", nfs.data().get("enable_nfs").asBoolean() ? "true" : "false");
@@ -1005,7 +1256,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			metric(out, "NFS|nfs_total_ops", nfsRow.get("total_OPS").asDouble());
 			metric(out, "NFS|nfs_read_ops", nfsRow.get("read_OPS").asDouble());
 			metric(out, "NFS|nfs_write_ops", nfsRow.get("write_OPS").asDouble());
-			metric(out, "NFS|nfs_max_latency", nfsRow.get("total_max_latency").asDouble());
+			// Build 35 (issue #42): DSM sends microseconds; published in ms,
+			// and skipped when absent. See SynologyMetrics.microsToMillis.
+			metricIfPresent(out, "NFS|nfs_max_latency",
+					SynologyMetrics.nfsMaxLatency(SJ, nfsRow));
 		}
 
 		if (s.isRead(SnapshotReads.CONNECTIONS)) {
@@ -1038,7 +1292,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		metricIfPresent(out, "Capacity|usage_pct", cap.usagePct);
 
 		prop(out, "Configuration|raid_type", pool.get("raidType").asString(""));
-		prop(out, "Configuration|status", pool.get("status").asString(""));
+		textIfPresent(out, "Configuration|status", pool.get("status"));
 		prop(out, "Configuration|pool_path", pool.get("pool_path").asString(""));
 		prop(out, "Configuration|device_type", pool.get("device_type").asString(""));
 
@@ -1067,7 +1321,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 
 		prop(out, "Configuration|volume_path", volPath);
 		prop(out, "Configuration|fs_type", vol.get("fs_type").asString(""));
-		prop(out, "Configuration|status", vol.get("status").asString(""));
+		textIfPresent(out, "Configuration|status", vol.get("status"));
 		prop(out, "Configuration|description", vol.get("deploy_path").asString(""));
 
 		// Volume IO from Utilization (keyed by vol_path stripped of leading /)
@@ -1087,7 +1341,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson cache = SynologyTopology.cacheForVolume(SJ, vol, s.storage);
 		if (cache != null) {
 			prop(out, "Cache|cache_enabled", "true");
-			prop(out, "Cache|cache_status", cache.get("status").asString(""));
+			textIfPresent(out, "Cache|cache_status", cache.get("status"));
 			// Peer review: published only when DSM sent them.
 			metricIfPresent(out, "Cache|cache_read_hit_rate",
 					SynologyMetrics.num(SJ, cache.get("hit_rate")));
@@ -1117,7 +1371,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		prop(out, "Hardware|size_bytes", disk.get("size_total").asString("0"));
 
 		metric(out, "Health|temperature", disk.get("temp").asDouble());
-		prop(out, "Health|smart_status", disk.get("smart_status").asString(""));
+		// Build 35 (review W1): present-only. DSM's "unknown" (SMART not
+		// readable; Storage Manager treats it like a disconnected drive) is
+		// published as sent; the bundled symptom matches failure values only.
+		textIfPresent(out, "Health|smart_status", disk.get("smart_status"));
 		metric(out, "Health|unc_sectors", disk.get("unc").asDouble());
 		// Build 32 (issue #34): remain_life is {trustable, value}; -1 (HDD)
 		// and untrusted values are not published. See SynologyMetrics.
@@ -1154,7 +1411,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		metric(out, "Capacity|memory_used", cache.get("memory").asDouble());
 
 		prop(out, "Configuration|mode", cache.get("mode").asString(""));
-		prop(out, "Configuration|status", cache.get("status").asString(""));
+		textIfPresent(out, "Configuration|status", cache.get("status"));
 		prop(out, "Configuration|mount_volume", cache.get("mountSpaceId").asString(""));
 		prop(out, "Configuration|device_type", cache.get("device_type").asString(""));
 		prop(out, "Configuration|skip_seq_io",
@@ -1179,8 +1436,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			prop(out, "Hardware|total_capacity",
 					String.format("%.1f GiB", totalBytes / (1024.0 * 1024.0 * 1024.0)));
 		}
-		prop(out, "Hardware|disk_failure_count",
-				String.valueOf(cache.get("disk_failure_number").asLong()));
+		// Build 35 (review W4): skipped when DSM omits disk_failure_number,
+		// never published as "0" (it feeds the SSD Cache Disk Failure symptom).
+		propIfPresent(out, "Hardware|disk_failure_count",
+				SynologyMetrics.count(SJ, cache.get("disk_failure_number")));
 	}
 
 	private void collectIscsiLun(ResourceConfig rc, Snapshot s, List<MetricData> out)
@@ -1216,7 +1475,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			metric(out, "IO|read_throughput", io.get("read_throughput").asDouble());
 			metric(out, "IO|write_throughput", io.get("write_throughput").asDouble());
 			// Build 32 (issue #34): DSM's fields are read_avg_latency and
-			// write_avg_latency; skipped when absent. See SynologyMetrics.
+			// write_avg_latency; skipped when absent. Build 35 (issue #42):
+			// DSM sends microseconds, published in ms. See SynologyMetrics.
 			metricIfPresent(out, "IO|read_latency", SynologyMetrics.lunLatency(
 					SJ, io, "read_avg_latency", "read_latency"));
 			metricIfPresent(out, "IO|write_latency", SynologyMetrics.lunLatency(
@@ -1288,7 +1548,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		boolean connected = ups.data().get("usb_ups_connect").asBoolean();
 		metric(out, "Battery|charge_pct", ups.data().get("charge").asDouble());
 		metric(out, "Battery|runtime_seconds", ups.data().get("runtime").asDouble());
-		prop(out, "Status|status", ups.data().get("status").asString(""));
+		// Build 35 (review B1, W1): DSM's usb_ups_status_* key, present-only.
+		textIfPresent(out, "Status|status", ups.data().get("status"));
 		prop(out, "Status|mode", ups.data().get("mode").asString(""));
 		prop(out, "Status|connected", connected ? "true" : "false");
 	}
@@ -1566,7 +1827,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson networkInterfaces;
 		SimpleJson connections;
 		SimpleJson shares;
+		SimpleJson systemHealth;
 		SimpleJson ups; // nullable: UPS optional
+		/**
+		 * Build 35: the UPS endpoint's answer this cycle, whether or not a
+		 * UPS is connected; null when its read failed. Only ReadKinds uses
+		 * it; collection uses {@link #ups}.
+		 */
+		SimpleJson upsAnswer;
 		/**
 		 * Build 34 (issue #11): this cycle's DiskStation identity, resolved
 		 * from {@code SYNO.DSM.Info} serial by the configuration's
@@ -1646,6 +1914,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			s.networkInterfaces = r.networkInterfaces;
 			s.connections = r.connections;
 			s.shares = r.shares;
+			s.systemHealth = r.systemHealth;
 			s.unread = r.unread;
 
 			// NIT-1 (build-15): contract-assert one required field on the two
@@ -1678,6 +1947,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			adapter.checkpoint("Core.ExternalDevice.UPS");
 			try {
 				SimpleJson ups = api.upsGet();
+				s.upsAnswer = ups;
 				if (ups.data().get("usb_ups_connect").asBoolean()) {
 					s.ups = ups;
 				}
@@ -1774,7 +2044,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 				}
 				NfsProbes.Result<SimpleJson> probes = nfsProbes.run(shareNames,
 						api::nfsSharePrivilege,
-						rules -> rules.data().get("rule").size(),
+						// Build 35: no rule list is a failed probe (-1).
+						rules -> rules.data().get("rule").isList()
+								? rules.data().get("rule").size() : -1,
 						adapter::checkpoint, adapter::logWarn);
 				nfsRulesByShare.putAll(probes.rulesByShare);
 				nfsProbeFailed.putAll(probes.failed);

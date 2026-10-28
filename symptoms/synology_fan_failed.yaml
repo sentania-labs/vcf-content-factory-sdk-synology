@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology Fan Failed"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Fan|fan_health
+  operator: EQ
+  value: "failed"
+
+description: >
+  Triggers when the DiskStation reports a failed fan (Fan|fan_health equals failed).

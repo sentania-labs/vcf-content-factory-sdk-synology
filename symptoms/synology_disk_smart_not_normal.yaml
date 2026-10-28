@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology Disk SMART Failing"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDisk
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Health|smart_status
+  operator: REGEX
+  value: "^(failing|degraded|access_err)$"
+
+description: >
+  Triggers when a disk's SMART status (Health|smart_status) is one of the failure values DSM defines: failing, degraded or access_err.

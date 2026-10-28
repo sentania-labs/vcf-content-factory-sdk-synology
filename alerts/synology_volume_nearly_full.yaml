@@ -1,0 +1,26 @@
+name: "[VCF Content Factory] Synology Volume Nearly Full"
+description: >
+  Fires when a Synology volume usage crosses the warning (warning) or critical (critical) threshold.
+adapter_kind: synology_diskstation
+resource_kind: SynologyVolume
+type: 18
+sub_type: 20
+wait_cycles: 1
+cancel_cycles: 1
+criticality: SYMPTOM_BASED
+impact:
+  badge: RISK
+symptom_sets:
+  operator: ANY
+  sets:
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology Volume Usage Warning"
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology Volume Usage Critical"
+recommendations:
+  - name: "[VCF Content Factory] Synology Free Volume Space"
+    priority: 1

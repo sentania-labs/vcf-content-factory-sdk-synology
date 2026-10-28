@@ -44,6 +44,9 @@ EXPECT = [
     ("SynologyDisk", "remain_life", "%", "Remaining Life"),
     ("SynologyIscsiLun", "read_latency", "ms", "Read Latency"),
     ("SynologyIscsiLun", "write_latency", "ms", "Write Latency"),
+    # issue #42 (build 35): DSM sends microseconds; the adapter divides by
+    # 1000 and the declared unit stays ms (vSphere adapter convention)
+    ("SynologyDiskstation", "nfs_max_latency", "ms", "NFS Max Latency"),
 ]
 
 

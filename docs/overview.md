@@ -94,6 +94,15 @@ normally — collection is never failed over the optional cross-link.
 
 ## Notable Behaviors
 
+- **Objects DSM no longer reports are marked Not Existing and deleted
+  (build 35).** Missing for 12 consecutive complete cycles, an object is
+  marked Not Existing and VCF Operations deletes it, with its history,
+  after the Deleted Objects retention. Only a kind read in full counts: a
+  failed read, an empty list without DSM's evidence, or a pool DSM reports
+  missing or awaiting assembly counts nothing for the kinds it touches.
+  The first upgrade removes the pre-build-34 leftovers. Rules:
+  [REFERENCE.md, Removed objects](../REFERENCE.md#removed-objects).
+
 - **Each NAS has its own objects (build 34, issue #11).** Every object is
   identified by its DiskStation: the DSM serial number, or the account's
   `host:<host>:<port>` when DSM sends none (announced by one WARN). Before
@@ -108,9 +117,11 @@ normally — collection is never failed over the optional cross-link.
   throws and marks the resource ERROR rather than publishing `0.0`
   sentinels on a GREEN instance. A snapshot refresh failure propagates —
   the adapter never registers a silent zero-resource cycle.
-- **Secrets are redacted from logs and errors.** The DSM `entry.cgi` URL
-  carries the `_sid` session token on every call and `account=`/`passwd=`
-  on login; these are masked in all thrown/logged messages while the
+- **Secrets stay out of URLs, logs and errors.** Since build 35 the login
+  and every DSM call are form POSTs to `entry.cgi`: `account=`/`passwd=` on
+  login and the `_sid` session token on every call travel in the request
+  body, never in the URL, so DSM's web server log and any proxy log never
+  see them. They are also masked in all thrown/logged messages while the
   failing endpoint stays identifiable.
 - **Fresh-instance discovery works on VCF Ops 9.0.2.** The adapter
   enumerates its storage tree on the collect path
@@ -196,6 +207,23 @@ normally — collection is never failed over the optional cross-link.
   INFO line per cycle naming it. Every other relationship, including the
   Datastore cross-link, is still published. Before build 31 such an object
   threw, and no relationships at all were published, every cycle.
+
+## Bundled Alerts
+
+Build 35 ships nine alerts with their symptoms and recommendations, all
+enabled by default: Storage Pool Not Healthy, Volume Not Healthy, Volume
+Nearly Full, Disk Failing, SSD Cache Failure, Fan Failure, UPS On
+Battery, Storage Degraded and Expansion Unit Lost. The last two are on the
+DiskStation and read DSM Storage Manager's own health card: a Critical or
+Warning storage verdict, a missing pool or one awaiting assembly, a crashed
+system partition or one that needs repair, a lost expansion unit (with a
+Critical verdict, as DSM shows it) or an incompatible one; none has been
+seen degraded live. Conditions, severities and the DSM values they match:
+[REFERENCE.md, Bundled alerts](../REFERENCE.md#bundled-alerts). Fan health
+comes from DSM's System Health, which reports only its top problem, so a
+fan failure is hidden while another problem outranks it, and a Fan
+Failure alert that is already open clears after 3 cycles once that
+happens, even though the fan is still failed.
 
 ## Known Limitations
 

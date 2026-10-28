@@ -1,22 +1,21 @@
 # Inventory Tree: VCF Content Factory Synology DiskStation
 
-> Generated from `describe.xml` v0.0.0.34. Do not edit: regenerated on every build.
+> Generated from `describe.xml` v0.0.0.35. Do not edit: regenerated on every build.
 
 **Traversal Spec:** Synology DiskStation Storage Tree
 
 ## Traversal Tree
 
-- **Synology DiskStation** (`synology_diskstation`)
-  - **Synology World** (`SynologyWorld`)
-    - **Synology Diskstation** (`SynologyDiskstation`)
-      - **Synology Storage Pool** (`SynologyStoragePool`)
-        - **Synology Volume** (`SynologyVolume`)
-          - **Synology iSCSI LUN** (`SynologyIscsiLun`)
-            - **Datastore** (`Datastore`)
-          - **Synology NFS Export** (`SynologyNfsExport`)
-          - **Synology SSD Cache** (`SynologySsdCache`)
-            - **Synology Disk** (`SynologyDisk`)
-      - **Synology UPS** (`SynologyUps`)
+- **Synology World** (`SynologyWorld`)
+  - **Synology Diskstation** (`SynologyDiskstation`)
+    - **Synology Storage Pool** (`SynologyStoragePool`)
+      - **Synology Volume** (`SynologyVolume`)
+        - **Synology iSCSI LUN** (`SynologyIscsiLun`)
+          - **Datastore** (`Datastore`)
+        - **Synology NFS Export** (`SynologyNfsExport`)
+        - **Synology SSD Cache** (`SynologySsdCache`)
+          - **Synology Disk** (`SynologyDisk`)
+    - **Synology UPS** (`SynologyUps`)
 
 > \* = identifying (unique) key
 
@@ -24,7 +23,7 @@
 
 | Kind | Display Label | Identifying Keys | Parent(s) |
 |------|--------------|-----------------|-----------|
-| `SynologyWorld` | Synology World | `world_id` *, `diskstation_id` * | Synology DiskStation |
+| `SynologyWorld` | Synology World | `world_id` *, `diskstation_id` * | - |
 | `SynologyDiskstation` | Synology Diskstation | `serial` * | Synology World |
 | `SynologyStoragePool` | Synology Storage Pool | `pool_id` *, `diskstation_id` * | Synology Diskstation |
 | `SynologyVolume` | Synology Volume | `volume_id` *, `diskstation_id` * | Synology Storage Pool |

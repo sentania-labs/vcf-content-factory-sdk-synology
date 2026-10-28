@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology SSD Cache Failed"
+adapter_kind: synology_diskstation
+resource_kind: SynologySsdCache
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Configuration|status
+  operator: REGEX
+  value: "^(degrade|crashed|deverr|ro)$"
+
+description: >
+  Triggers when an SSD cache status (Configuration|status) is one of the failure values DSM defines: degrade, crashed, deverr or ro (read-only).

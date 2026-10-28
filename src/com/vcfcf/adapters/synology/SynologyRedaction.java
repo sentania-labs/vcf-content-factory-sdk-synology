@@ -20,13 +20,17 @@ final class SynologyRedaction {
 	/**
 	 * Masks secret-bearing query parameters before a path, query string or
 	 * exception message can reach the adapter log or a Test Connection
-	 * error. The DSM entry.cgi URL carries the session id ({@code _sid}) on
+	 * error. The DSM request (a form body since build 35, issue #16; the
+	 * URL before) carries the session id ({@code _sid}) on
 	 * every authenticated call and, on the login call, the URL-encoded
-	 * plaintext password and account ({@code passwd=}, {@code account=}).
+	 * plaintext password and account ({@code passwd=}, {@code account=});
+	 * the same patterns mask the body, and a {@code Cookie:} header's
+	 * {@code id} value is masked too.
 	 * Build 32 (issue #27): also the Suite API shapes ({@code password=},
 	 * {@code username=}, {@code user=}, {@code token=} and
 	 * {@code principal=} parameters, URL userinfo, JSON {@code username},
-	 * {@code password}, {@code token} and {@code authToken} members, and an
+	 * {@code password}, {@code token} and {@code authToken} members (build
+	 * 35: and DSM's {@code sid}, {@code synotoken} and {@code did}), and an
 	 * OpsToken, Bearer or Basic credential), for the Suite API exception
 	 * messages the adapter logs. Each query parameter value is masked up to
 	 * the next {@code &} or the end of the text,
@@ -42,6 +46,11 @@ final class SynologyRedaction {
 				.replaceAll("(?i)(_sid=)[^&]*", "$1<redacted>")
 				.replaceAll("(?i)(passwd=)[^&]*", "$1<redacted>")
 				.replaceAll("(?i)(account=)[^&]*", "$1<redacted>")
+				// Build 35 (issue #16): DSM also takes the session as the id
+				// cookie; a Cookie header's id value is masked up to the next
+				// ; or whitespace (the adapter sends _sid in the body, not the
+				// cookie, but a header dump must not leak it either).
+				.replaceAll("(?i)(Cookie:[^\\r\\n]*?\\bid=)[^;\\s]*", "$1<redacted>")
 				// Build 32 (issue #27): Suite API shapes. A form or query
 				// password, user, token or principal (the framework Suite API
 				// client ends its 401 and token messages in principal=<user>),
@@ -50,7 +59,10 @@ final class SynologyRedaction {
 				// OpsToken, Bearer or Basic credential.
 				.replaceAll("(?i)(password=|username=|user=|token=|principal=)[^&]*",
 						"$1<redacted>")
-				.replaceAll("(?i)(\"(?:username|password|token|authToken)\"\\s*:\\s*\")"
+				// Build 35 (review N3): also DSM's login response members, the
+				// session id (sid), the CSRF token (synotoken) and the trusted
+				// device id (did), should a login body ever reach a log.
+				.replaceAll("(?i)(\"(?:username|password|token|authToken|sid|synotoken|did)\"\\s*:\\s*\")"
 						+ "(?:[^\"\\\\]|\\\\.)*", "$1<redacted>")
 				.replaceAll("(?i)(://)[^/\\s@]+@", "$1<redacted>@")
 				.replaceAll("(?i)((?:vRealizeOpsToken|OpsToken|Bearer|Basic)"

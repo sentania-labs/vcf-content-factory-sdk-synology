@@ -24,6 +24,7 @@ public final class RedactionTest {
 		wrappedConnectFailureStillDown();
 		suiteApiShapesAreMasked();
 		frameworkPrincipalAndReviewShapesAreMasked();
+		dsmLoginResponseIsMasked();
 		System.out.println("RedactionTest: all assertions passed");
 	}
 
@@ -128,5 +129,18 @@ public final class RedactionTest {
 		}
 		T.check(SynologyRedaction.redact("https://ops.example/suite-api/api")
 				.equals("https://ops.example/suite-api/api"), "a plain URL is kept");
+	}
+
+	/** Build 35 (review N3): a DSM login response body's sid, synotoken and did. */
+	static void dsmLoginResponseIsMasked() {
+		String body = "{\"data\":{\"did\":\"DID999\",\"sid\":\"abcSID123\","
+				+ "\"synotoken\":\"SYNO999\"},\"success\":true}";
+		String r = SynologyRedaction.redact(body);
+		for (String secret : new String[] {"DID999", "abcSID123", "SYNO999"}) {
+			T.check(!r.contains(secret), "login body: " + secret + " leaked: " + r);
+		}
+		T.check(r.contains("\"success\":true"), "login body: the rest kept: " + r);
+		T.check(SynologyRedaction.redact("{\"side\":\"left\"}")
+				.equals("{\"side\":\"left\"}"), "a member that only starts with sid is kept");
 	}
 }

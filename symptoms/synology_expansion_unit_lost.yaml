@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology Expansion Unit Lost"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Health|expansion_unit_lost
+  operator: EQ
+  value: "true"
+
+description: >
+  Triggers when DSM reports an expansion unit as lost (Health|expansion_unit_lost equals true).

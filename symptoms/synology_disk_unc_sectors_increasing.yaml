@@ -1,0 +1,14 @@
+name: "[VCF Content Factory] Synology Disk Uncorrectable Sectors Increasing"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDisk
+severity: WARNING
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: metric_dynamic
+  key: Health|unc_sectors
+  direction: ABOVE
+
+description: >
+  Triggers when a disk's uncorrectable sector count (Health|unc_sectors) rises above its dynamic threshold, meaning it increased from its normal level. A steady nonzero count does not trigger.

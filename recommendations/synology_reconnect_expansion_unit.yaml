@@ -1,0 +1,8 @@
+name: "[VCF Content Factory] Synology Reconnect Expansion Unit"
+description: |
+  DSM reports that storage space is affected by a lost expansion unit while the storage verdict is Critical, or that an attached expansion unit is not compatible with this DiskStation. Storage pools and volumes that live on a lost expansion unit are unavailable until it reconnects.
+
+  Check that the expansion unit has power and is switched on. Check the expansion cable at both ends, reseat it, and try a different cable if one is available. Then open DSM Storage Manager and confirm that the expansion unit and its pools come back.
+
+  If DSM reports the unit as incompatible, check the Synology compatibility list for the DiskStation and expansion unit models, and update DSM to the latest version supported for the model. Do not remove drives from a lost unit; reconnect it first so that its pools can be assembled again.
+adapter_kind: synology_diskstation

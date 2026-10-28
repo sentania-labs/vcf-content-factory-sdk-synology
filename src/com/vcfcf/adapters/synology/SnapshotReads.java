@@ -56,7 +56,8 @@ import java.util.function.Consumer;
  * the same three 30 s attempts per call). See
  * {@link SynologyFailures#endsBuild}.
  *
- * <p>The call order is unchanged from build 30.
+ * <p>The call order is unchanged from build 30; build 35 appends
+ * {@link #SYSTEM_HEALTH} after the shares.
  *
  * <p>One instance per configuration (it holds the once-per-endpoint WARN
  * state); thread safe.
@@ -74,6 +75,13 @@ final class SnapshotReads {
 	static final String NICS = "SYNO.Core.Network.Interface";
 	static final String CONNECTIONS = "SYNO.Core.CurrentConnection";
 	static final String SHARES = "SYNO.Core.Share";
+	/**
+	 * Build 35 (review B2): DSM's own system health verdict, the API behind
+	 * DSM's System Health widget. The only place DSM reports a failed fan on
+	 * a desktop model; see {@link SystemHealth}. Read last, so the call
+	 * order of the earlier endpoints is unchanged.
+	 */
+	static final String SYSTEM_HEALTH = "SYNO.Core.System.SystemHealth";
 
 	/** The endpoints whose failure fails the snapshot build. */
 	static final Set<String> REQUIRED = Collections.unmodifiableSet(
@@ -98,6 +106,7 @@ final class SnapshotReads {
 		J networkInterfaceList() throws IOException, InterruptedException;
 		J currentConnections() throws IOException, InterruptedException;
 		J shareList() throws IOException, InterruptedException;
+		J systemHealth() throws IOException, InterruptedException;
 	}
 
 	/** Called before each DSM call (the adapter's abort check). */
@@ -123,6 +132,7 @@ final class SnapshotReads {
 		J networkInterfaces;
 		J connections;
 		J shares;
+		J systemHealth;
 		/** Optional endpoint to a one-line reason, for those not read. */
 		final Map<String, String> unread = new LinkedHashMap<>();
 
@@ -176,6 +186,8 @@ final class SnapshotReads {
 		r.connections = get(CONNECTIONS, src::currentConnections, empty, r, cp,
 				warn, info);
 		r.shares = get(SHARES, src::shareList, empty, r, cp, warn, info);
+		r.systemHealth = get(SYSTEM_HEALTH, src::systemHealth, empty, r, cp,
+				warn, info);
 		return r;
 	}
 
@@ -284,6 +296,8 @@ final class SnapshotReads {
 			case SHARES:
 				return "NFS export objects, their metrics and their Volume and "
 						+ "Datastore relationships";
+			case SYSTEM_HEALTH:
+				return "the DiskStation system health and fan health properties";
 			default:
 				return "the metrics that depend on it";
 		}

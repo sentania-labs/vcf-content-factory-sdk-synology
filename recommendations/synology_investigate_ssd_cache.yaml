@@ -1,0 +1,8 @@
+name: "[VCF Content Factory] Synology Investigate SSD Cache Failure"
+description: |
+  The SSD cache reports a failed cache disk or a failure status (degrade, crashed, deverr or ro). A read-write cache that fails can lose data that was not yet written to the volume.
+
+  Open DSM Storage Manager, go to SSD Cache, and check the status of the cache and its disks, including SMART health. Replace any failed SSD.
+
+  If the cache is read-write and degraded, consider switching to a read-only cache or removing the cache until the SSD is replaced, then recreate it and let it warm up again.
+adapter_kind: synology_diskstation

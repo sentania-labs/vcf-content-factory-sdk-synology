@@ -50,7 +50,11 @@ final class NfsProbes {
 		J load(String share) throws IOException, InterruptedException;
 	}
 
-	/** The number of NFS rules in a probe answer. */
+	/**
+	 * The number of NFS rules in a probe answer, or a negative number when
+	 * the answer carries no rule list (build 35 review: a success-shaped
+	 * answer with no {@code rule} list is a failed probe, not zero rules).
+	 */
 	interface RuleCount<J> {
 		int of(J rules);
 	}
@@ -161,10 +165,20 @@ final class NfsProbes {
 				cp.check("NFS rule probe for share " + name);
 				try {
 					J rules = probe.load(name);
+					int n = count.of(rules);
+					if (n < 0) {
+						// Build 35: an answer with no rule list says nothing
+						// about the share's rules; recorded as failed, never
+						// folded into "not an export".
+						exports.remove(name);
+						nonExports.remove(name);
+						failed(r, name, "answered with no rule list", now, warn);
+						continue;
+					}
 					exports.remove(name);
 					nonExports.remove(name);
 					warnedAt.remove(name);
-					if (count.of(rules) > 0) {
+					if (n > 0) {
 						r.rulesByShare.put(name, rules);
 						exports.put(name, rules);
 					} else {
@@ -191,15 +205,7 @@ final class NfsProbes {
 					exports.remove(name);
 					nonExports.remove(name);
 					r.failed.put(name, SynologyFailures.describe(e));
-					Long last = warnedAt.get(name);
-					if (warnEveryMs <= 0 || last == null || now - last >= warnEveryMs) {
-						warnedAt.put(name, now);
-						warn.accept("Snapshot: NFS rule probe failed for share "
-								+ name + ": " + e.getMessage()
-								+ (warnEveryMs > 0 ? " (logged at most once every "
-										+ (warnEveryMs / 60_000L) + " minutes per "
-										+ "share while it keeps failing)" : ""));
-					}
+					warnFailed(name, e.getMessage(), now, warn);
 				}
 			}
 			if (full) {
@@ -207,6 +213,26 @@ final class NfsProbes {
 				everRefreshed = true;
 			}
 			return r;
+		}
+
+		/** A probe that answered without a rule list: failed, not remembered. */
+		private void failed(Result<J> r, String name, String reason, long now,
+				Consumer<String> warn) {
+			r.failed.put(name, reason);
+			warnFailed(name, reason, now, warn);
+		}
+
+		private void warnFailed(String name, String message, long now,
+				Consumer<String> warn) {
+			Long last = warnedAt.get(name);
+			if (warnEveryMs <= 0 || last == null || now - last >= warnEveryMs) {
+				warnedAt.put(name, now);
+				warn.accept("Snapshot: NFS rule probe failed for share "
+						+ name + ": " + message
+						+ (warnEveryMs > 0 ? " (logged at most once every "
+								+ (warnEveryMs / 60_000L) + " minutes per "
+								+ "share while it keeps failing)" : ""));
+			}
 		}
 	}
 }

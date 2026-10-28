@@ -4,9 +4,13 @@
 - W1 (issue #20): collectNfsExport fails an existing export while the NFS
   service is off, before it publishes anything, and the snapshot sets
   nfsDisabled only from NfsProbes.serviceOff.
+- Build 35 (issue #16): the login and every authenticated call are form
+  POSTs; only SYNO.API.Info is a GET.
 - W3 (issue #17, DEF-001): both callRaw overloads route IOException and
   RuntimeException through SynologyRedaction.transportFailure, and no
   other catch of the HTTP call exists.
+- Build 35 review W1, B2: pool, volume, cache, SMART and UPS statuses are
+  present-only; Fan|fan_health comes from SystemHealth, gated on its read.
 - Round 2 (R13, R14): the Datastore duplicate-row filter runs before the
   count and the index; memory_usage_pct uses SynologyMetrics.memoryUsagePct.
 Stdlib only; run from anywhere (ci/run_java_tests.sh runs it).
@@ -46,9 +50,22 @@ def main():
     assert "throw SynologyRedaction.transportFailure(endpoint, e);" in raw, \
         "callRaw does not rethrow through SynologyRedaction.transportFailure"
     assert raw.count("catch (") == 1, "callRaw has another catch around the HTTP call"
-    short = body(CLIENT, r"private SimpleJson callRaw\(String path, String endpoint\)")
-    assert "return callRaw(http, path, endpoint);" in short, \
+    short = body(CLIENT, r"private SimpleJson callRaw\(DsmRequest req, String endpoint\)")
+    assert "return callRaw(http, req, endpoint);" in short, \
         "the short callRaw overload does not delegate"
+    # Build 35 (issue #16): a request with a body is a form POST; only the
+    # bodiless SYNO.API.Info request is a GET, and no URL carries _sid,
+    # account or passwd.
+    assert re.search(r"req\.body == null\s*\?\s*via\.get\(req\.path,", raw) and \
+        re.search(r"via\.post\(req\.path, req\.body, DsmRequest\.FORM,", raw), \
+        "callRaw does not POST the form body"
+    assert CLIENT.count("DsmRequest.get(") == 1 and \
+        "DsmRequest.get(DsmApis.INFO_PATH)" in CLIENT, \
+        "a GET other than SYNO.API.Info is back"
+    assert "synoUrl" not in CLIENT and "&_sid=" not in CLIENT and "?api=" not in CLIENT, \
+        "a query-string request builder is back in the client"
+    login = body(CLIENT, r"private String sendLogin\(\)")
+    assert "dsmRequest(DsmApis.AUTH, 7, \"login\"" in login, "login is not a form POST"
     # Round 2 R13 (issue #28, review N3): duplicate rows are skipped before
     # they are counted or indexed.
     load = body(STITCHER, r"public int loadDatastores\(\)")
@@ -88,6 +105,77 @@ def main():
                          ADAPTER), f"{key} is not published through loadAverage from {field}"
         assert ADAPTER.count(key.split("|", 1)[1] + '"') == 1, \
             f"{key} is published somewhere else too"
+    # Build 35 review W1: the statuses the bundled symptoms read are
+    # present-only (skipped when DSM omits them or sends them blank), never
+    # published as "".
+    for fn, key, field in (
+            (r"private void collectStoragePool\(", "Configuration|status", "pool"),
+            (r"private void collectVolume\(", "Configuration|status", "vol"),
+            (r"private void collectVolume\(", "Cache|cache_status", "cache"),
+            (r"private void collectDisk\(", "Health|smart_status", "disk"),
+            (r"private void collectSsdCache\(", "Configuration|status", "cache"),
+            (r"private void collectUps\(", "Status|status", "ups")):
+        b = body(ADAPTER, fn)
+        assert re.search(r'textIfPresent\(out, "' + re.escape(key) + r'", ', b), \
+            f"{fn}: {key} is not present-only"
+        assert not re.search(r'prop\(out, "' + re.escape(key) + r'"', b), \
+            f"{fn}: {key} is still published with prop()"
+    # Build 35 review B2: fan health comes from DSM's System Health rule,
+    # only when that endpoint was read.
+    ds = body(ADAPTER, r"private void collectDiskstation\(")
+    assert re.search(r'if \(s\.isRead\(SnapshotReads\.SYSTEM_HEALTH\)\)', ds), \
+        "system health is not gated on its read"
+    assert 'propIfPresent(out, "Fan|fan_health", SystemHealth.fanHealth(SJ, rule))' in ds, \
+        "Fan|fan_health is not SystemHealth.fanHealth"
+    # Build 35 review W4: the SSD cache failed-disk count feeds the SSD
+    # Cache Disk Failure symptom, so a count DSM omits is skipped, not "0".
+    sc = body(ADAPTER, r"private void collectSsdCache\(")
+    assert re.search(r'propIfPresent\(out, "Hardware\|disk_failure_count",\s*'
+                     r'SynologyMetrics\.count\(SJ, cache\.get\("disk_failure_number"\)\)\);',
+                     sc), "Hardware|disk_failure_count is not present-only"
+    assert ADAPTER.count('"Hardware|disk_failure_count"') == 1, \
+        "Hardware|disk_failure_count is published somewhere else too"
+    # Build 35 review R4-W2: DSM's storage verdict and the expansion-unit
+    # and unassembled-pool signals on the DiskStation, every one
+    # present-only, from load_info (always read), published once.
+    for key, src in (
+            ("Health|storage_status_level", "SynologyMetrics.text(SJ, statusLevel)"),
+            ("Health|storage_status", "storageLevel);"),
+            ("Health|expansion_unit_lost", "StorageOverview.flag("),
+            ("Health|incompatible_expansion_units", "StorageOverview.count(incompatible.isList(), incompatible.size())"),
+            ("Health|missing_pools", "StorageOverview.count(missingPools.isList(), missingPools.size())"),
+            ("Health|detected_pools", "StorageOverview.count(detectedPools.isList(), detectedPools.size())"),
+            ("Health|system_partition_crashed", "StorageOverview.flag("),
+            ("Health|system_partition_needs_repair",
+             "StorageOverview.systemPartitionNeedsRepair(")):
+        m = re.search(r'propIfPresent\(out, "' + re.escape(key) + r'",\s*' + re.escape(src), ds)
+        assert m, f"{key} is not present-only from {src}"
+        assert ADAPTER.count('"' + key + '"') == 1, f"{key} published elsewhere too"
+    assert 'overview.get("space_affect_by_eunit_lost").asString()' in ds
+    assert 'SimpleJson sysStatus = storageData.get("env").get("status");' in ds
+    # Review R5-N2: the env.status key names, as DSM sends them (lab probe
+    # and storage_panel.js); a typo would silently drop both properties.
+    assert re.search(r'propIfPresent\(out, "Health\|system_partition_crashed", '
+                     r'StorageOverview\.flag\(\s*sysStatus\.get\("system_crashed"\)'
+                     r'\.asString\(\)\)\);', ds), "system_crashed key"
+    assert re.search(
+        r'StorageOverview\.systemPartitionNeedsRepair\(\s*'
+        r'sysStatus\.get\("system_need_repair"\)\.asString\(\),\s*'
+        r'sysStatus\.get\("rootbackup_need_repair"\)\.asString\(\),\s*'
+        r'sysStatus\.get\("system_crashed"\)\.asString\(\),\s*'
+        r'sysStatus\.get\("system_rebuilding"\)\.asString\(\),\s*'
+        r'sysStatus\.get\("rootbackup_rebuilding"\)\.asString\(\),\s*'
+        r'storageLevel\)\);', ds), "system partition repair keys"
+    assert re.search(r'String storageLevel = StorageOverview\.level\(statusLevel\.asString\(\),'
+                     r'\s*levelNames\(overview\.get\("sample_level_str"\)\)\);', ds)
+    assert 'propIfPresent(out, "Health|storage_status", storageLevel);' in ds
+    assert 'levelNames(overview.get("sample_level_str"))' in ds
+    describe = (ROOT / "describe.xml").read_text()
+    for key in ("storage_status", "storage_status_level", "expansion_unit_lost",
+                "incompatible_expansion_units", "missing_pools", "detected_pools",
+                "system_partition_crashed", "system_partition_needs_repair"):
+        assert re.search(r'<ResourceAttribute key="' + key + r'" nameKey="\d+" '
+                         r'dataType="string" isProperty="true"/>', describe), key
     print("test_collect_wiring: all assertions passed")
 
 

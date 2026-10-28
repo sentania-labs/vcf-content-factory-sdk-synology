@@ -1,0 +1,26 @@
+name: "[VCF Content Factory] Synology SSD Cache Failure"
+description: >
+  Fires when the SSD cache reports a failed cache disk or a failure status (degrade, crashed, deverr or ro).
+adapter_kind: synology_diskstation
+resource_kind: SynologySsdCache
+type: 18
+sub_type: 18
+wait_cycles: 1
+cancel_cycles: 1
+criticality: CRITICAL
+impact:
+  badge: HEALTH
+symptom_sets:
+  operator: ANY
+  sets:
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology SSD Cache Disk Failure"
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology SSD Cache Failed"
+recommendations:
+  - name: "[VCF Content Factory] Synology Investigate SSD Cache Failure"
+    priority: 1

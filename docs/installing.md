@@ -86,6 +86,7 @@ unread, and the framework logs its own line for each of them:
 | `SYNO.Core.Share` | NFS export objects (existing ones go ERROR), their Volume and Datastore relationships |
 | `SYNO.Core.FileServ.NFS.SharePrivilege` (per share) | that share's NFS rules: an existing NFS export on it goes ERROR (no `rule_count` or `allowed_clients` is published), the relationships of the Volume that share sits on are left unchanged (other Volumes still refresh), and a share not yet known as an export is not discovered until its probe succeeds |
 | `SYNO.Core.ExternalDevice.UPS` | the UPS object |
+| `SYNO.Core.System.SystemHealth` (build 35) | DiskStation `Health\|system_health*` and `Fan\|fan_health` properties (the Fan Failure alert cannot fire) |
 
 The UPS read keeps its build 30 logging: an INFO each cycle. The
 per-share NFS rule probe (build 32) runs only while the NFS service is
@@ -133,8 +134,11 @@ an administrators-group account (see above).
 > **Session note:** the adapter manages its own DSM session. It logs in to
 > obtain a `_sid` session token, passes `_sid` on every Web API call, and
 > re-authenticates automatically when DSM reports the session expired (DSM
-> error 106 / 107 / 119). The `_sid` value is redacted from all logs and
-> error messages.
+> error 106 / 107 / 119). Since build 35 the login and every call are HTTPS
+> POSTs with the account, password and `_sid` in the request body, never in
+> the URL, so they do not land in DSM's web server access log or a proxy's
+> (only the session-less `SYNO.API.Info` query is a GET). The `_sid` value
+> is redacted from all logs and error messages.
 
 ## Network Requirements
 
@@ -230,10 +234,15 @@ path's HTTPS requirement.
 
 ## Step-by-Step Installation
 
-1. Install the `.pak` file via **Data Sources > Integrations > Repository > Add**
-   (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**).
-2. After installation, navigate to **Data Sources > Integrations > Accounts**
-   (9.1, verified 2026-10-16; on 8.x, **Administration > Solutions**).
+1. Install the `.pak` file from the **Repository** tab of Integrations,
+   **Add**: on 9.1.1, **Operate** tab > **Administration** >
+   **Integrations** > **Repository**; on 9.0.2 and 8.18.7,
+   **Administration** > **Integrations** > **Repository** (verified
+   2026-10-28).
+2. After installation, open the **Accounts** tab of Integrations (the
+   default tab): on 9.1.1, **Operate** tab > **Administration** >
+   **Integrations** > **Accounts**; on 9.0.2 and 8.18.7,
+   **Administration** > **Integrations** > **Accounts**.
 3. Click **Add Account** and select **VCF Content Factory Synology DiskStation**.
 4. Fill in the configuration fields above (host, port `5001`, DSM
    credentials; leave `allowInsecure` at `false`).
@@ -250,6 +259,10 @@ NFS export, UPS and World objects once (they are now identified by the
 DiskStation's serial number), and history on the old objects does not carry
 over. See [Upgrading](../README.md#upgrading) for what changes and how to
 delete the old objects.
+
+Upgrading to build 35 divides iSCSI LUN read/write latency and the
+DiskStation's NFS max latency by 1000 (DSM sends microseconds; the metrics
+are declared in ms). See [Upgrading](../README.md#upgrading).
 
 ## Troubleshooting
 

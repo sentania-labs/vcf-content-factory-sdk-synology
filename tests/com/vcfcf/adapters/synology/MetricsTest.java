@@ -37,7 +37,9 @@ public final class MetricsTest {
 		capacityWithoutTotalPublishesNoUsage();
 		remainLifeReadsTheObjectValue();
 		lunLatencyUsesTheAvgFields();
+		latenciesAreMicrosecondsPublishedAsMs();
 		loadAveragesAreDividedBy100();
+		missingFailureCountIsNotZero();
 		System.out.println("MetricsTest: all assertions passed");
 	}
 
@@ -186,12 +188,33 @@ public final class MetricsTest {
 				"total_throughput", 867388, "total_io_latency", 66);
 		T.eq(0.0, SynologyMetrics.lunLatency(MAPS, row, "read_avg_latency",
 				"read_latency"), "read latency, a real 0");
-		T.eq(71.0, SynologyMetrics.lunLatency(MAPS, row, "write_avg_latency",
-				"write_latency"), "write latency from write_avg_latency");
-		T.eq(5.0, SynologyMetrics.lunLatency(MAPS, obj("read_latency", 5),
+		// Build 35 (issue #42): DSM sends microseconds; 71 us is 0.071 ms.
+		T.eq(0.071, SynologyMetrics.lunLatency(MAPS, row, "write_avg_latency",
+				"write_latency"), "write latency from write_avg_latency, in ms");
+		T.eq(0.005, SynologyMetrics.lunLatency(MAPS, obj("read_latency", 5),
 				"read_avg_latency", "read_latency"), "old field name still read");
 		T.eq(null, SynologyMetrics.lunLatency(MAPS, obj("read_iops", 3),
 				"read_avg_latency", "read_latency"), "absent: not published");
+	}
+
+	/**
+	 * Build 35 (issue #42): live DS1520+ rows (2026-10-28). DSM's Resource
+	 * Monitor shows 2188 as "2.2 ms" and 329 as "329 us"; NFS 54993 as
+	 * "55.0 ms".
+	 */
+	static void latenciesAreMicrosecondsPublishedAsMs() {
+		Map<String, Object> lun = obj("read_avg_latency", 2188,
+				"write_avg_latency", 329, "total_io_latency", 935);
+		T.eq(2.188, SynologyMetrics.lunLatency(MAPS, lun, "read_avg_latency",
+				"read_latency"), "LUN read latency in ms");
+		T.eq(0.329, SynologyMetrics.lunLatency(MAPS, lun, "write_avg_latency",
+				"write_latency"), "LUN write latency in ms");
+		Map<String, Object> nfs = obj("device", "nfs", "read_max_latency", 54993,
+				"total_max_latency", 54993, "write_max_latency", 1150);
+		T.eq(54.993, SynologyMetrics.nfsMaxLatency(MAPS, nfs), "NFS max latency in ms");
+		T.eq(null, SynologyMetrics.nfsMaxLatency(MAPS, obj("device", "nfs")),
+				"NFS max latency absent: not published (was 0)");
+		T.eq(null, SynologyMetrics.microsToMillis(null), "null stays null");
 	}
 
 	/** Review N5: ovs_eth0 beside eth0 carries the same traffic. */
@@ -260,5 +283,32 @@ public final class MetricsTest {
 		T.eq(null, SynologyMetrics.loadAverage(MAPS, obj("user_load", 5), "1min_load"),
 				"absent: not published, not 0");
 		T.eq(null, SynologyMetrics.loadAverage(MAPS, null, "1min_load"), "no cpu object");
+	}
+
+	/**
+	 * Build 35 (review W4): the SSD cache's {@code disk_failure_number}
+	 * becomes {@code Hardware|disk_failure_count}. DSM 7.3.2 sends it as a
+	 * number (0 on the lab DS1520+'s healthy cache, 2026-10-28); a cache
+	 * object without it must publish nothing, not "0".
+	 */
+	static void missingFailureCountIsNotZero() {
+		T.eq("0", SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", 0), "disk_failure_number")),
+				"a real 0 is published");
+		T.eq("2", SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", 2), "disk_failure_number")),
+				"two failed disks");
+		T.eq("1", SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", "1"), "disk_failure_number")),
+				"a numeric string counts");
+		T.eq(null, SynologyMetrics.count(MAPS,
+				MAPS.get(obj("mode", "read-write"), "disk_failure_number")),
+				"absent: skipped, not 0");
+		T.eq(null, SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", null), "disk_failure_number")),
+				"JSON null: skipped");
+		T.eq(null, SynologyMetrics.count(MAPS,
+				MAPS.get(obj("disk_failure_number", ""), "disk_failure_number")),
+				"blank: skipped");
 	}
 }

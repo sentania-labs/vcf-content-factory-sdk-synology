@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology Storage Pool Failed"
+adapter_kind: synology_diskstation
+resource_kind: SynologyStoragePool
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Configuration|status
+  operator: REGEX
+  value: "^(degrade|crashed|deverr)$"
+
+description: >
+  Triggers when a storage pool status (Configuration|status) is one of the failure values DSM defines: degrade, crashed or deverr.

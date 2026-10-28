@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology System Partition Needs Repair"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+severity: WARNING
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Health|system_partition_needs_repair
+  operator: EQ
+  value: "true"
+
+description: >
+  Triggers when DSM reports the system partition needs repair (Health|system_partition_needs_repair equals true).

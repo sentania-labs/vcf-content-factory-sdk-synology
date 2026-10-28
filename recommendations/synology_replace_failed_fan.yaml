@@ -1,0 +1,10 @@
+name: "[VCF Content Factory] Synology Replace Failed Fan"
+description: |
+  DSM System Health reports a failed fan. Treat this as a partial signal: DSM returns only its top-ranked problem, so a fan fault can be hidden behind a higher-ranked issue and the absence of this alert does not prove the fans are fine. Check the fans in DSM even when this alert is clear if you suspect a cooling problem.
+
+  Without cooling, disks and the CPU can overheat and shorten the life of the hardware.
+
+  Open DSM Control Panel, go to Hardware and Power, and check the fan status. Shut down and check the fan for dust or obstruction, and confirm the fan connector is seated.
+
+  If the fan still reports a failure, replace it. Contact Synology support for a replacement fan on models that have a fan module. Check the disk temperatures in DSM until the fan is replaced.
+adapter_kind: synology_diskstation

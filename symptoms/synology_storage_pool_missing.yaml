@@ -1,0 +1,15 @@
+name: "[VCF Content Factory] Synology Storage Pool Missing"
+adapter_kind: synology_diskstation
+resource_kind: SynologyDiskstation
+severity: CRITICAL
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: property
+  key: Health|missing_pools
+  operator: NOT_EQ
+  value: "0"
+
+description: >
+  Triggers when DSM reports one or more missing storage pools (Health|missing_pools is not 0).

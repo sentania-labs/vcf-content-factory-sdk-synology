@@ -1,0 +1,16 @@
+name: "[VCF Content Factory] Synology Volume Usage Warning"
+adapter_kind: synology_diskstation
+resource_kind: SynologyVolume
+severity: WARNING
+wait_cycles: 3
+cancel_cycles: 3
+
+condition:
+  type: metric_static
+  key: Capacity|usage_pct
+  operator: GT_EQ
+  value: 85
+  instanced: false
+
+description: >
+  Triggers when volume usage (Capacity|usage_pct) is at or above 85 percent.

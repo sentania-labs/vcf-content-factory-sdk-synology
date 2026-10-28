@@ -11,7 +11,7 @@
 <path d="M 710.0,862.0 L 710.0,721.0 L 430.0,721.0 L 430.0,580.0" fill="none" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path d="M 150.0,490.0 L 150.0,535.0 L 430.0,535.0 L 430.0,580.0" fill="none" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
 <path d="M 150.0,304.0 L 150.0,349.0 L 430.0,349.0 L 430.0,394.0" fill="none" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)"/>
-<rect x="40" y="40" width="220" height="96" rx="6" fill="#f8fafc" stroke="#374151" stroke-width="1.5"/>
+<rect x="40" y="40" width="220" height="96" rx="6" fill="#e3f2fd" stroke="#1565c0" stroke-width="2"/>
 <text x="150" y="62" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="600" fill="#111827" text-anchor="middle">Synology World</text>
 <text x="150" y="80" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#374151" text-anchor="middle">world_id *</text>
 <text x="150" y="95" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" fill="#374151" text-anchor="middle">diskstation_id *</text>

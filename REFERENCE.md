@@ -457,8 +457,8 @@ raise them.
 
 | Alert | Object | Symptoms | Symptom condition | Severity | On by default |
 |---|---|---|---|---|---|
-| Storage Pool Not Healthy | Storage Pool | Storage Pool Failed | `Configuration\|status` matches `^(degrade\|crashed\|deverr\|pool_crashed\|pool_error)$` | Critical | yes |
-| Volume Not Healthy | Volume | Volume Failed | `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro\|pool_crashed\|pool_error)$` | Critical | yes |
+| Storage Pool Not Healthy | Storage Pool | Storage Pool Failed | `Configuration\|status` matches `^(degrade\|crashed\|deverr)$` | Critical | yes |
+| Volume Not Healthy | Volume | Volume Failed | `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro)$` | Critical | yes |
 | Volume Nearly Full | Volume | Volume Usage Warning / Volume Usage Critical | `Capacity\|usage_pct` >= 85 / >= 95 | Warning / Critical | yes |
 | Disk Failing | Disk | Disk SMART Failing / Disk Uncorrectable Sectors Increasing | `Health\|smart_status` matches `^(failing\|degraded\|access_err)$` / `Health\|unc_sectors` above its dynamic threshold | Critical / Warning | yes |
 | SSD Cache Failure | SSD Cache | SSD Cache Disk Failure / SSD Cache Failed | `Hardware\|disk_failure_count` != `0` / `Configuration\|status` matches `^(degrade\|crashed\|deverr\|ro)$` | Critical | yes |
@@ -468,15 +468,15 @@ raise them.
 Value sources (DSM 7.3.2 UI code on the lab DS1520+, 2026-10-28): pool and
 volume status keys are DSM's `volume_status_*` string table (`degrade`
 Degraded, `crashed` Crashed, `deverr` Unknown Error, `ro` Read Only).
-The pool and volume patterns also list `pool_crashed` and `pool_error`,
-but those values never appear in `Configuration|status`: DSM keeps them
+The pool and volume patterns leave out `pool_crashed` and `pool_error`,
+because those values never appear in `Configuration|status`: DSM keeps them
 in the object's `space_status.status` (Storage Manager's
 `isAllowedToEject` and `isPotentialCrashed` read them there), a separate
 field whose values carry a prefix (`pool_normal` on a healthy pool,
 `fs_normal` on a healthy volume, `cache_normal` on a healthy SSD cache;
 lab DS1520+, DSM 7.3.2, 2026-10-28), while `status` reads `normal`. The
-adapter publishes the top-level `status` only, so those two alternatives
-never match. Storage Manager reads a crashed pool from the top-level
+adapter publishes the top-level `status` only, so a pattern for those two
+values could never match. Storage Manager reads a crashed pool from the top-level
 field (`isAllocStatCrashed`: `"crashed"===this.status`). No failure value
 has been seen live on a failing pool or volume. Not failures, so they raise
 nothing: `normal` and the in-progress states (`background`, `repair`,

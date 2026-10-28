@@ -48,10 +48,10 @@ nothing. Limits: DSM's System Health reports only its highest-ranked
 problem, so a fan failure is not visible (fan health `unknown`) while
 another problem outranks it, and a Fan Failure alert that is already
 open clears after 3 cycles once another problem outranks the fan, even
-though the fan is still failed; the pool and volume patterns also list
-`pool_crashed` and `pool_error`, but DSM keeps those in a different field
-(`space_status.status`) that the adapter does not read, so they never
-appear in `Configuration|status`; the UPS values come from DSM's own UI code
+though the fan is still failed; the pool and volume patterns leave out
+DSM's `pool_crashed` and `pool_error`, because DSM keeps those in a
+different field (`space_status.status`) that the adapter does not read,
+so they never appear in `Configuration|status`; the UPS values come from DSM's own UI code
 and have not yet been seen on a live UPS; the uncorrectable-sector
 symptom needs a few days of history before its dynamic threshold exists.
 The status conditions are regular expressions over DSM's own failure

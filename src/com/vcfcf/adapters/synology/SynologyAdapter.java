@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Synology DiskStation adapter — framework v2 (build 14).
@@ -100,6 +101,14 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 */
 	private volatile SuiteApiStitcher suiteStitcher;
 	private volatile SynologyStitcher stitcher;
+
+	/**
+	 * Build 35 (buildkit 1.0.22): the kinds the last finished enumeration
+	 * read in full ({@link ReadKinds}) and its thread, or null while one runs
+	 * or after one threw. Volatile: a discovery pass may run on another
+	 * thread.
+	 */
+	private volatile ReadRecord lastRead;
 
 	/**
 	 * Per-cycle snapshot of the Synology API responses, shared across all
@@ -534,6 +543,40 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	}
 
 	/**
+	 * Build 35 (buildkit 1.0.22): the kinds this cycle's enumeration read in
+	 * full, so the framework counts a miss (and after
+	 * {@code notExistingMissedCycles()}, 12 by default, marks NOT_EXISTING)
+	 * only for those. The rule is {@link ReadKinds}: no NFS export when any
+	 * share's rule probe failed, no UPS, SSD cache, LUN or DiskStation when
+	 * its read failed, no pool, volume or disk unless storage
+	 * {@code load_info} was complete.
+	 */
+	@Override
+	protected Set<String> kindsReadThisCycle() {
+		ReadRecord r = lastRead;
+		// Only this thread's enumeration speaks for this cycle: a discovery
+		// pass on another thread (getDiscoverer) never stands in for it.
+		return r != null && r.thread == Thread.currentThread() ? r.kinds : null;
+	}
+
+	/** Build 35: the World is never marked (it is always delivered). */
+	@Override
+	protected Set<String> notExistingExcludedKinds() {
+		return ReadKinds.EXCLUDED;
+	}
+
+	/** Build 35: one enumeration's read kinds and the thread that ran it. */
+	private static final class ReadRecord {
+		final Thread thread;
+		final Set<String> kinds;
+
+		ReadRecord(Thread thread, Set<String> kinds) {
+			this.thread = thread;
+			this.kinds = kinds;
+		}
+	}
+
+	/**
 	 * Build 31 (issue #12): marks the start of a collection or discovery
 	 * pass in the current configuration's snapshot cache. A no-op before
 	 * the first configure.
@@ -567,6 +610,10 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	@Override
 	protected void enumerateResources(ResourceSink sink)
 			throws InterruptedException, Exception {
+		// Build 35 (buildkit 1.0.22): nothing is declared read until this
+		// enumeration has finished; a throw leaves null (nothing is marked).
+		lastRead = null;
+		ReadKinds read = new ReadKinds();
 		Snapshot s = currentSnapshot();
 		// Build 34 (issue #11): every object below the DiskStation, and the
 		// World, carries the DiskStation identity as a second identifying
@@ -581,55 +628,77 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		String model = s.dsmInfo.data().get("model").asString("");
 		sink.accept(rcOf(DeviceIdentity.DISKSTATION_KIND,
 				s.device.diskstationName(model), "serial", dev, null));
+		read.systemHealth(s.isRead(SnapshotReads.SYSTEM_HEALTH));
 
 		SimpleJson storage = s.storage;
 		int pools = 0, volumes = 0, disks = 0, caches = 0, luns = 0, exports = 0;
+		// Build 35: records with no identity, counted for ReadKinds.
+		int storageNoId = 0, cachesNoId = 0, lunsNoUuid = 0, sharesNoName = 0;
 
 		for (SimpleJson pool : storage.data().get("storagePools").asList()) {
+			String poolId = pool.get("id").asString();
+			if (ReadKinds.noId(poolId)) storageNoId++;
 			sink.accept(rcOf("SynologyStoragePool", poolDisplayName(pool),
-					"pool_id", pool.get("id").asString(), dev));
+					"pool_id", poolId, dev));
 			pools++;
 		}
 		for (SimpleJson vol : storage.data().get("volumes").asList()) {
 			String volPath = vol.get("vol_path").asString();
+			String volId = vol.get("volume_id").asString(volPath);
+			if (ReadKinds.noId(volId)) storageNoId++;
 			sink.accept(rcOf("SynologyVolume", volumeDisplayName(vol),
-					"volume_id", vol.get("volume_id").asString(volPath), dev));
+					"volume_id", volId, dev));
 			volumes++;
 		}
 		for (SimpleJson disk : storage.data().get("disks").asList()) {
 			String diskId = disk.get("id").asString();
+			if (ReadKinds.noId(diskId)) storageNoId++;
 			sink.accept(rcOf("SynologyDisk", disk.get("name").asString(diskId),
 					"disk_id", diskId, dev));
 			disks++;
 		}
+		read.storage(storage.data().get("storagePools").isList(),
+				storage.data().get("volumes").isList(),
+				storage.data().get("disks").isList(), disks, storageNoId);
 		SimpleJson ssdCaches = storage.data().get("ssdCaches");
 		if (!ssdCaches.isNull()) {
 			for (SimpleJson cache : ssdCaches.asList()) {
+				String cacheId = cache.get("id").asString();
+				if (ReadKinds.noId(cacheId)) cachesNoId++;
 				sink.accept(rcOf("SynologySsdCache",
 						cacheDisplayName(cache, storage),
-						"cache_id", cache.get("id").asString(), dev));
+						"cache_id", cacheId, dev));
 				caches++;
 			}
 		}
+		read.ssdCaches(ssdCaches.isList(), cachesNoId);
 
-		for (SimpleJson lun : s.lunList.data().get("luns").asList()) {
+		SimpleJson lunList = s.lunList.data().get("luns");
+		for (SimpleJson lun : lunList.asList()) {
 			String uuid = lun.get("uuid").asString();
+			if (ReadKinds.noId(uuid)) lunsNoUuid++;
 			sink.accept(rcOf("SynologyIscsiLun",
 					lun.get("name").asString(uuid), "lun_uuid", uuid, dev));
 			luns++;
 		}
+		read.luns(s.isRead(SnapshotReads.LUNS), lunList.isList(), lunsNoUuid);
 
 		// NFS exports: a share is an export iff the snapshot kept >0 NFS rules
 		// for it (nfsRulesByShare). Same gating as build 16's per-share probe,
 		// served from the snapshot — no re-probe.
-		for (SimpleJson share : s.shares.data().get("shares").asList()) {
+		SimpleJson shareList = s.shares.data().get("shares");
+		for (SimpleJson share : shareList.asList()) {
 			String name = share.get("name").asString();
+			if (ReadKinds.noId(name)) sharesNoName++;
 			if (s.nfsRulesByShare.containsKey(name)) {
 				sink.accept(rcOf("SynologyNfsExport", name, "share_name", name,
 						dev));
 				exports++;
 			}
 		}
+		// Build 35: one failed share probe leaves every export out.
+		read.exports(s.isRead(SnapshotReads.SHARES), shareList.isList(),
+				sharesNoName, s.nfsDisabled, s.nfsProbeFailed.size());
 
 		// UPS (optional): present in the snapshot only when usb_ups_connect=true.
 		if (s.ups != null) {
@@ -637,12 +706,18 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			sink.accept(rcOf("SynologyUps", upsModel, "ups_model", upsModel,
 					dev));
 		}
+		SimpleJson upsAnswer = s.upsAnswer == null ? null : s.upsAnswer.data();
+		read.ups(upsAnswer != null,
+				upsAnswer != null && !upsAnswer.get("usb_ups_connect").isNull(),
+				s.ups != null,
+				s.ups != null && !ReadKinds.noId(s.ups.data().get("model").asString()));
 
 		logInfo("Synology enumerate (" + DeviceIdentity.ID_KEY + "=" + dev
 				+ "): 1 world, 1 diskstation, " + pools
 				+ " pools, " + volumes + " volumes, " + disks + " disks, "
 				+ caches + " ssd-caches, " + luns + " luns, " + exports
 				+ " nfs-exports");
+		lastRead = new ReadRecord(Thread.currentThread(), read.kinds());
 	}
 
 	private ResourceConfig rcOf(String kind, String name, String idKey,
@@ -1612,6 +1687,12 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		SimpleJson systemHealth;
 		SimpleJson ups; // nullable: UPS optional
 		/**
+		 * Build 35: the UPS endpoint's answer this cycle, whether or not a
+		 * UPS is connected; null when its read failed. Only ReadKinds uses
+		 * it; collection uses {@link #ups}.
+		 */
+		SimpleJson upsAnswer;
+		/**
 		 * Build 34 (issue #11): this cycle's DiskStation identity, resolved
 		 * from {@code SYNO.DSM.Info} serial by the configuration's
 		 * {@link DeviceIdentity}. Never null in a built snapshot.
@@ -1723,6 +1804,7 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 			adapter.checkpoint("Core.ExternalDevice.UPS");
 			try {
 				SimpleJson ups = api.upsGet();
+				s.upsAnswer = ups;
 				if (ups.data().get("usb_ups_connect").asBoolean()) {
 					s.ups = ups;
 				}

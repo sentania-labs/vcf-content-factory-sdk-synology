@@ -15,7 +15,7 @@ javac -d "$out" -sourcepath src:tests \
     tests/com/vcfcf/adapters/synology/*.java
 for t in AllowInsecureTest SnapshotCacheTest SnapshotTimingTest \
         FailureMappingTest SnapshotReadsTest SnapshotIsolationTest NfsProbesTest DsmRequestTest \
-        DsmSessionTest TeardownTest TopologyTest DeviceIdentityTest RedactionTest SessionNameTest MetricsTest CacheJoinTest DatastoreIndexTest DsmApisTest SystemHealthTest; do
+        DsmSessionTest TeardownTest TopologyTest DeviceIdentityTest RedactionTest SessionNameTest MetricsTest CacheJoinTest DatastoreIndexTest DsmApisTest SystemHealthTest ReadKindsTest; do
     java -cp "$out" "com.vcfcf.adapters.synology.$t"
 done
 python3 tests/test_allow_insecure_default.py
@@ -28,3 +28,4 @@ python3 tests/test_api_info_wiring.py
 python3 tests/test_collect_wiring.py
 python3 tests/test_device_identity_wiring.py
 python3 tests/test_traversal_root.py
+python3 tests/test_vanished_wiring.py

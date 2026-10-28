@@ -147,6 +147,41 @@ new `Health|system_health`, `system_health_rule` and
 SSD cache, SMART and UPS statuses that DSM does not send are now skipped
 instead of published as an empty value.
 
+### To build 35: objects DSM no longer reports are deleted, and the first upgrade deletes the pre-build-34 leftovers
+
+**Build 35 marks objects DSM no longer reports as Not Existing, and VCF
+Operations then deletes them; on the first upgrade that includes every
+leftover from before build 34, at once.** An object missing from 12
+consecutive complete collection cycles (an hour at the default 5-minute
+interval) is marked Not Existing, and VCF Operations deletes it, with its
+metric history, alerts and group membership, after the Deleted Objects
+retention (Global Settings; 168 hours by default, 6 hours on some labs).
+Counting starts on the first build 35 cycle and covers every object the pack
+registered in the past under a key it no longer produces. This cannot be
+undone.
+
+That includes the pool, volume, disk, SSD cache, iSCSI LUN, NFS export and
+UPS objects from before build 34 (no **DiskStation ID** identifier; section
+"To build 34" below), which until now stayed Data Receiving with frozen
+values until deleted by hand. On devel_9_1 and devel_8_18 (read 2026-10-28)
+each has 29 such objects: 16 NFS exports, 7 disks, 2 iSCSI LUNs, 1 storage
+pool, 1 volume, 1 SSD cache and the old `Synology World`. All but the World
+are marked about 12 cycles after the upgrade. The World kind is never marked
+(it is the pack's own root object), so delete the old `Synology World` by
+hand once its children are gone.
+
+Only a kind read in full counts a miss, so a failed read never deletes
+anything: one share whose NFS rule probe failed counts no export miss that
+cycle, and a failed UPS, SSD cache, iSCSI or System Health read counts no
+miss for its kind. Details: REFERENCE.md, Removed objects. The framework's
+own warning is in the factory's buildkit release notes
+(`.github/release-notes-buildkit.md`, Behavior since 1.0.22, "On first
+opt-in, every orphan goes").
+
+Before upgrading, list the pack's objects (inventory, adapter type **VCF
+Content Factory Synology DiskStation**) and export anything whose history
+you want to keep.
+
 ### To build 34 (from 1.0.0.30, 0.0.0.33 or earlier): Synology objects are re-created once
 
 Build 34 fixes two or more NASes writing into the same objects (issue #11):
@@ -183,7 +218,9 @@ them as new objects on the first collection after the upgrade.
 cycles): in the VCF Operations inventory, list the objects of the adapter
 type **VCF Content Factory Synology DiskStation**. Do not go by collection
 state (the old objects still show Data Receiving) or by health; go by name
-and identifiers. The old objects are the World named exactly
+and identifiers. (From build 35 the adapter marks these itself, World
+excepted, about 12 cycles after the upgrade; see the section above.) The
+old objects are the World named exactly
 `Synology World` (the new one is `Synology World (<serial>)`), and every
 pool, volume, disk, SSD cache, LUN, NFS export and UPS whose identifiers have
 no **DiskStation ID**. Select them and delete them. If you run several NASes

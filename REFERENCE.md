@@ -57,9 +57,11 @@ adapter instances (two NASes) never write into the same object.
 - The World is one per DiskStation, named `Synology World (<serial>)`.
 - An object that does not carry the current identity (one from before
   build 34, or from an earlier fallback identity) gets no new metrics or
-  properties and is logged once at INFO. VCF Operations still shows it as
-  Data Receiving with its last values frozen until it is deleted. Delete
-  it; see the README section Upgrading.
+  properties and is logged once at INFO. Up to build 34 VCF Operations
+  showed it as Data Receiving with its last values frozen until it was
+  deleted by hand. From build 35 it is marked Not Existing after 12 complete
+  cycles and deleted by retention, except a World (see Removed objects and
+  the README section Upgrading).
 
 ## Object Types
 
@@ -424,6 +426,50 @@ sent, 1000 times too large; earlier builds published 0.
 
 `disk_failure_count` is DSM's `disk_failure_number`. It is skipped when DSM
 does not send it (build 35; before, a missing count was published as `0`).
+
+---
+
+## Removed objects
+
+Build 35 (framework buildkit 1.0.22): an object DSM no longer reports is
+marked **Not Existing** after it has been missing from 12 consecutive
+complete collection cycles (an hour at the default 5-minute interval), the
+way the vSphere, vSAN and NSX adapters mark a deleted object. VCF Operations
+then stops collecting it, shows it as Not Existing (health grey) and deletes
+it, with its history, after the global **Deleted Objects** retention setting
+(168 hours by default). The pack declares a kind read in full only when
+nothing about its read failed that cycle, and only a kind read in full
+counts a miss (`ReadKinds`):
+
+| Kinds | Counted only when |
+|---|---|
+| Diskstation | `SYNO.Core.System.SystemHealth` was read too (the DiskStation itself comes from `SYNO.DSM.Info`, which every cycle needs) |
+| Storage Pool, Volume, Disk | storage `load_info` was complete: pools, volumes and disks each a list, at least one disk, and every pool, volume and disk with its id (a volume's `volume_id`, else `vol_path`) |
+| SSD Cache | `load_info` sent `ssdCaches` as a list with an `id` on every cache |
+| iSCSI LUN | `SYNO.Core.ISCSI.LUN` was read and sent `luns` as a list with a `uuid` on every LUN |
+| NFS Export | `SYNO.Core.Share` was read as a list with a name on every share, the NFS service was not reported off, and no share's NFS rule probe failed |
+| UPS | `SYNO.Core.ExternalDevice.UPS` answered with `usb_ups_connect`, and with the `model` when a UPS is connected; an answer of no UPS connected counts the old UPS as gone |
+
+So one share whose NFS probe failed counts no export miss, however long it
+lasts, nor does a failed UPS, LUN or System Health read for its kind; the
+count resumes when the read is complete again. While the NFS service is off,
+an export is ERROR, not gone, and is not counted. A NAS without SAN Manager
+sends no LUN list (DSM error 102), so its LUNs are not counted either; delete
+leftover LUN objects by hand after removing SAN Manager. A cycle whose
+snapshot failed (a required endpoint, or the DiskStation identity) counts
+nothing at all. Synology World is never marked (`notExistingExcludedKinds`),
+so a World from before build 34 stays until deleted by hand. The counts are
+held in memory, so a collector restart delays a mark and never makes one
+early. A marked object that comes back is registered again by discovery;
+that path is not yet seen live (framework note,
+`knowledge/context/sdk/vanished_object_lifecycle.md` in the factory).
+
+**First upgrade to build 35:** every object registered under a key the pack
+no longer produces is counted from the first cycle. On devel_9_1 and
+devel_8_18 (2026-10-28) that is 29 pre-build-34 objects with no
+`diskstation_id` each: 16 NFS exports, 7 disks, 2 iSCSI LUNs, 1 storage
+pool, 1 volume and 1 SSD cache, which are marked about 12 cycles after the
+upgrade, and the old `Synology World`, which is not.
 
 ---
 

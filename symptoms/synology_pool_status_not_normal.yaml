@@ -1,4 +1,4 @@
-name: "[VCF Content Factory] Synology Storage Pool Status Not Normal"
+name: "[VCF Content Factory] Synology Storage Pool Failed"
 adapter_kind: synology_diskstation
 resource_kind: SynologyStoragePool
 severity: CRITICAL
@@ -8,8 +8,8 @@ cancel_cycles: 3
 condition:
   type: property
   key: Configuration|status
-  operator: NOT_EQ
-  value: "normal"
+  operator: REGEX
+  value: "^(degrade|crashed|deverr|pool_crashed|pool_error)$"
 
 description: >
-  Triggers when a storage pool status (Configuration|status) is anything other than normal, for example degraded or crashed.
+  Triggers when a storage pool status (Configuration|status) is one of the failure values DSM defines: degrade, crashed, deverr, pool_crashed or pool_error.

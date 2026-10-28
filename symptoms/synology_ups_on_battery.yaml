@@ -8,8 +8,8 @@ cancel_cycles: 3
 condition:
   type: property
   key: Status|status
-  operator: CONTAINS
-  value: "OB"
+  operator: EQ
+  value: "usb_ups_status_battery"
 
 description: >
-  Triggers when the UPS NUT status (Status|status) contains OB (on battery), meaning mains power was lost.
+  Triggers when the UPS status (Status|status) equals usb_ups_status_battery, DSM's key for running on battery after mains power was lost.

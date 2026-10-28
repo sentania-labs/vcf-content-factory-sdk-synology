@@ -7,9 +7,9 @@ cancel_cycles: 3
 
 condition:
   type: property
-  key: Fan|fan_status
+  key: Fan|fan_health
   operator: EQ
-  value: "no"
+  value: "failed"
 
 description: >
-  Triggers when the DiskStation reports a fan failure (Fan|fan_status equals no).
+  Triggers when the DiskStation reports a failed fan (Fan|fan_health equals failed).

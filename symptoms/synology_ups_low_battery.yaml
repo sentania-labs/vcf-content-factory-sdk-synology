@@ -8,8 +8,8 @@ cancel_cycles: 3
 condition:
   type: property
   key: Status|status
-  operator: CONTAINS
-  value: "LB"
+  operator: EQ
+  value: "usb_ups_status_low_batt"
 
 description: >
-  Triggers when the UPS NUT status (Status|status) contains LB (low battery). Begin graceful shutdown.
+  Triggers when the UPS status (Status|status) equals usb_ups_status_low_batt, DSM's key for a low battery. Begin graceful shutdown.

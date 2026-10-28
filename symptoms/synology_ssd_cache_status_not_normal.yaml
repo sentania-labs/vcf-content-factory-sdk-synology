@@ -1,4 +1,4 @@
-name: "[VCF Content Factory] Synology SSD Cache Status Not Normal"
+name: "[VCF Content Factory] Synology SSD Cache Failed"
 adapter_kind: synology_diskstation
 resource_kind: SynologySsdCache
 severity: CRITICAL
@@ -8,8 +8,8 @@ cancel_cycles: 3
 condition:
   type: property
   key: Configuration|status
-  operator: NOT_EQ
-  value: "normal"
+  operator: REGEX
+  value: "^(degrade|crashed|deverr|ro)$"
 
 description: >
-  Triggers when an SSD cache status (Configuration|status) is anything other than normal.
+  Triggers when an SSD cache status (Configuration|status) is one of the failure values DSM defines: degrade, crashed, deverr or ro (read-only).

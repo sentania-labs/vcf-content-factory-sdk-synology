@@ -1,0 +1,26 @@
+name: "[VCF Content Factory] Synology UPS On Battery"
+description: >
+  Fires when the UPS attached to the DiskStation is running on battery (warning) or its battery is low (critical).
+adapter_kind: synology_diskstation
+resource_kind: SynologyUps
+type: 17
+sub_type: 18
+wait_cycles: 1
+cancel_cycles: 1
+criticality: SYMPTOM_BASED
+impact:
+  badge: HEALTH
+symptom_sets:
+  operator: ANY
+  sets:
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology UPS On Battery"
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology UPS Low Battery"
+recommendations:
+  - name: "[VCF Content Factory] Synology Respond To UPS Power Event"
+    priority: 1

@@ -1,0 +1,8 @@
+name: "[VCF Content Factory] Synology Repair Degraded Storage"
+description: |
+  The storage pool or volume reports a status other than normal, which usually means it is degraded, repairing, crashed, or read-only.
+
+  Open DSM Storage Manager and check the status of the pool and volume, and which disk is missing or failed. Confirm that a current backup exists before making changes.
+
+  Replace or reseat the failed disk, then run Repair on the storage pool. Wait for the repair to finish; the pool stays exposed to a second disk failure until it does. If the status is crashed, stop writing to the volume and restore from backup rather than forcing a repair.
+adapter_kind: synology_diskstation

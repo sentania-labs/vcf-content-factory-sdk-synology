@@ -1,0 +1,8 @@
+name: "[VCF Content Factory] Synology Free Volume Space"
+description: |
+  The volume is running out of free space. A full volume can stop writes, break snapshots, and fail applications that store data on it.
+
+  Open DSM Storage Manager and review volume usage. Use Storage Analyzer to find the largest shares and files. Delete or move data that is no longer needed, empty the recycle bins, and remove old snapshots and replication points.
+
+  If the volume keeps growing, expand the storage pool by adding or replacing disks with larger ones, then expand the volume, or move data to another volume.
+adapter_kind: synology_diskstation

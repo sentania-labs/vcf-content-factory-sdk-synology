@@ -1,0 +1,22 @@
+name: "[VCF Content Factory] Synology Storage Pool Not Healthy"
+description: >
+  Fires when a Synology storage pool reports a status other than normal. Cancels when the status returns to normal.
+adapter_kind: synology_diskstation
+resource_kind: SynologyStoragePool
+type: 18
+sub_type: 18
+wait_cycles: 1
+cancel_cycles: 1
+criticality: CRITICAL
+impact:
+  badge: HEALTH
+symptom_sets:
+  operator: ALL
+  sets:
+    - defined_on: SELF
+      operator: ALL
+      symptoms:
+        - name: "[VCF Content Factory] Synology Storage Pool Status Not Normal"
+recommendations:
+  - name: "[VCF Content Factory] Synology Repair Degraded Storage"
+    priority: 1

@@ -1,0 +1,8 @@
+name: "[VCF Content Factory] Synology Replace Failing Disk"
+description: |
+  The DiskStation reports a disk with a SMART status that is not normal, or with uncorrectable sectors that keep increasing. Either one means the disk is on its way out.
+
+  Open DSM Storage Manager, go to HDD/SSD, and check the SMART details and the health status of the named disk. Run an extended SMART test if one has not run recently.
+
+  Confirm that the storage pool is healthy and that a recent backup exists. If the disk is failing, replace it with a drive of the same or larger size and repair the storage pool from Storage Manager. A slowly increasing uncorrectable sector count with a normal status is a warning: schedule the replacement before the status changes.
+adapter_kind: synology_diskstation

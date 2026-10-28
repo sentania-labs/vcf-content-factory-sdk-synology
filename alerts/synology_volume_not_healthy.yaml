@@ -1,6 +1,6 @@
 name: "[VCF Content Factory] Synology Volume Not Healthy"
 description: >
-  Fires when a Synology volume reports a failure status (degrade, crashed, deverr, ro, pool_crashed or pool_error). Cancels when the status clears.
+  Fires when a Synology volume reports a failure status (degrade, crashed, deverr or ro). Cancels when the status clears.
 adapter_kind: synology_diskstation
 resource_kind: SynologyVolume
 type: 18

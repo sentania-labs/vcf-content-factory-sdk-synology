@@ -1,6 +1,6 @@
 name: "[VCF Content Factory] Synology Repair Degraded Storage"
 description: |
-  The storage pool or volume reports a failure status: degrade, crashed, deverr, read-only (ro), pool_crashed or pool_error.
+  The storage pool or volume reports a failure status: degrade, crashed, deverr or read-only (ro).
 
   Open DSM Storage Manager and check the status of the pool and volume, and which disk is missing or failed. Confirm that a current backup exists before making changes.
 

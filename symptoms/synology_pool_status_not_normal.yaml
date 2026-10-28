@@ -9,7 +9,7 @@ condition:
   type: property
   key: Configuration|status
   operator: REGEX
-  value: "^(degrade|crashed|deverr|pool_crashed|pool_error)$"
+  value: "^(degrade|crashed|deverr)$"
 
 description: >
-  Triggers when a storage pool status (Configuration|status) is one of the failure values DSM defines: degrade, crashed, deverr, pool_crashed or pool_error.
+  Triggers when a storage pool status (Configuration|status) is one of the failure values DSM defines: degrade, crashed or deverr.

@@ -1,6 +1,6 @@
 name: "[VCF Content Factory] Synology Storage Pool Not Healthy"
 description: >
-  Fires when a Synology storage pool reports a failure status (degrade, crashed, deverr, pool_crashed or pool_error). Cancels when the status clears.
+  Fires when a Synology storage pool reports a failure status (degrade, crashed or deverr). Cancels when the status clears.
 adapter_kind: synology_diskstation
 resource_kind: SynologyStoragePool
 type: 18

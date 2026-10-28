@@ -548,8 +548,8 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 	 * {@code notExistingMissedCycles()}, 12 by default, marks NOT_EXISTING)
 	 * only for those. The rule is {@link ReadKinds}: no NFS export when any
 	 * share's rule probe failed, no UPS, SSD cache, LUN or DiskStation when
-	 * its read failed, no pool, volume or disk unless storage
-	 * {@code load_info} was complete.
+	 * its read failed (and no World without the DiskStation), no pool,
+	 * volume or disk unless storage {@code load_info} was complete.
 	 */
 	@Override
 	protected Set<String> kindsReadThisCycle() {
@@ -559,7 +559,11 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		return r != null && r.thread == Thread.currentThread() ? r.kinds : null;
 	}
 
-	/** Build 35: the World is never marked (it is always delivered). */
+	/**
+	 * Build 35: nothing is excluded. The World is counted with the
+	 * DiskStation ({@link ReadKinds}), so the pre-build-34 World, which the
+	 * enumeration never delivers, is marked like the other legacy objects.
+	 */
 	@Override
 	protected Set<String> notExistingExcludedKinds() {
 		return ReadKinds.EXCLUDED;
@@ -621,6 +625,9 @@ public final class SynologyAdapter extends VcfCfAdapter<SynologyConfig> {
 		final String dev = s.device.value;
 
 		// World: one per DiskStation (build 34; it was one shared object).
+		// Build 35: registered first and unconditionally, so whenever
+		// ReadKinds names the World kind (with the DiskStation) this World
+		// was delivered; only the pre-build-34 World takes a miss.
 		sink.accept(rcOf("SynologyWorld", s.device.worldName(),
 				"world_id", "synology_world", dev));
 

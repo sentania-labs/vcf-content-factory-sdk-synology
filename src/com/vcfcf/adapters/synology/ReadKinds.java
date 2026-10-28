@@ -105,8 +105,17 @@ import java.util.Set;
  *       it the enumeration keys the UPS "UPS"). A read that reports no UPS
  *       connected counts the old UPS as gone.</li>
  * </ul>
- * {@code SynologyWorld} is never named and is excluded ({@link #EXCLUDED}):
- * it is the synthetic root, one per DiskStation, delivered every cycle.
+ * {@code SynologyWorld}: with {@code SynologyDiskstation}, and only then
+ * (build 35, devel proof). The World is the synthetic root, one per
+ * DiskStation since build 34 ({@code diskstation_id}), and it is delivered
+ * from the same read as the DiskStation: the enumeration registers it
+ * first, unconditionally, once the snapshot is built, and a throw anywhere
+ * after it declares nothing. So in a cycle that names the kind the current
+ * World is always delivered, and only a World it did not deliver takes a
+ * miss: the pre-build-34 "Synology World" (no {@code diskstation_id}),
+ * which is otherwise left behind as a second tree root still parenting
+ * the DiskStation, or a World of an identity this configuration no longer
+ * has. Nothing is excluded ({@link #EXCLUDED} is empty).
  */
 final class ReadKinds {
 
@@ -120,10 +129,12 @@ final class ReadKinds {
 	static final String EXPORT = "SynologyNfsExport";
 	static final String UPS = "SynologyUps";
 
-	/** Kinds the framework must never mark. */
-	static final Set<String> EXCLUDED =
-			Collections.unmodifiableSet(new LinkedHashSet<>(
-					Collections.singletonList(WORLD)));
+	/**
+	 * Kinds the framework must never mark: none. Build 35 (devel proof):
+	 * the World was here, which left the pre-build-34 World as a second
+	 * tree root for good; it is now counted with the DiskStation.
+	 */
+	static final Set<String> EXCLUDED = Collections.emptySet();
 
 	private boolean systemHealthRead;
 	private boolean storageListsComplete;
@@ -354,7 +365,14 @@ final class ReadKinds {
 	/** The kinds read in full, for {@code kindsReadThisCycle()}. */
 	Set<String> kinds() {
 		Set<String> out = new LinkedHashSet<>();
-		if (systemHealthRead) out.add(DISKSTATION);
+		// Build 35 (devel proof): the World is delivered from the
+		// DiskStation's read, so it is named exactly when the DiskStation
+		// is; only a World this enumeration did not deliver (the
+		// pre-build-34 one) takes a miss.
+		if (systemHealthRead) {
+			out.add(WORLD);
+			out.add(DISKSTATION);
+		}
 		// Review R3-B1: a missing or detected pool (or no word from DSM)
 		// leaves out every kind that can live on it.
 		// Review R4-W1: so does a lost or incompatible expansion unit.

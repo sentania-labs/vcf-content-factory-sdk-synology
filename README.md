@@ -174,10 +174,12 @@ UPS objects from before build 34 (no **DiskStation ID** identifier; section
 "To build 34" below), which until now stayed Data Receiving with frozen
 values until deleted by hand. On devel_9_1 and devel_8_18 (read 2026-10-28)
 each has 29 such objects: 16 NFS exports, 7 disks, 2 iSCSI LUNs, 1 storage
-pool, 1 volume, 1 SSD cache and the old `Synology World`. All but the World
-are marked about 12 cycles after the upgrade. The World kind is never marked
-(it is the pack's own root object), so delete the old `Synology World` by
-hand once its children are gone.
+pool, 1 volume, 1 SSD cache and the old `Synology World`. All 29, the old
+World included, are marked about 12 cycles after the upgrade. The World is
+counted only in a cycle that read the DiskStation, and the current
+`Synology World (<serial>)` is delivered in every such cycle, so only the
+old one is marked. Once it is deleted, the tree's duplicate root goes away:
+the DiskStation no longer shows under two Worlds.
 
 Only a kind read in full counts a miss, so a failed read never deletes
 anything: one share whose NFS rule probe failed counts no export miss that
@@ -235,7 +237,7 @@ them as new objects on the first collection after the upgrade.
   its identity (DSM reports a serial), it is a child of both the old
   `Synology World` and the new `Synology World (<serial>)`: the old World
   keeps its last relationships. This goes away when the old World is
-  deleted.
+  deleted (from build 35 the adapter marks it, see above).
 - **Datastore links.** The VMware Datastore to iSCSI LUN / NFS export links
   are made for the new objects on the first cycle; the old objects keep
   theirs until they are deleted.
@@ -244,8 +246,8 @@ them as new objects on the first collection after the upgrade.
 cycles): in the VCF Operations inventory, list the objects of the adapter
 type **VCF Content Factory Synology DiskStation**. Do not go by collection
 state (the old objects still show Data Receiving) or by health; go by name
-and identifiers. (From build 35 the adapter marks these itself, World
-excepted, about 12 cycles after the upgrade; see the section above.) The
+and identifiers. (From build 35 the adapter marks these itself, the old
+World included, about 12 cycles after the upgrade; see the section above.) The
 old objects are the World named exactly
 `Synology World` (the new one is `Synology World (<serial>)`), and every
 pool, volume, disk, SSD cache, LUN, NFS export and UPS whose identifiers have

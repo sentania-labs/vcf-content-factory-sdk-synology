@@ -23,7 +23,7 @@ import java.util.Set;
 public final class ReadKindsTest {
 
 	public static void main(String[] args) {
-		completeReadNamesEveryKindButTheWorld();
+		completeReadNamesEveryKind();
 		completeReadCountsMisses();
 		upsReadFailureMarksNoUps();
 		upsAnswerWithoutConnectFieldMarksNoUps();
@@ -52,7 +52,7 @@ public final class ReadKindsTest {
 		pagedShareListMarksNoExport();
 		diskNamingUnlistedPoolKeepsStorage();
 		expansionUnitLostOrIncompatibleKeepsStorage();
-		worldIsExcluded();
+		worldCountedWithTheDiskStation();
 		System.out.println("ReadKindsTest: all assertions passed");
 	}
 
@@ -79,11 +79,11 @@ public final class ReadKindsTest {
 	private static final Set<String> STORAGE = set(ReadKinds.POOL,
 			ReadKinds.VOLUME, ReadKinds.DISK);
 
-	static void completeReadNamesEveryKindButTheWorld() {
-		T.eq(set(ReadKinds.DISKSTATION, ReadKinds.POOL, ReadKinds.VOLUME,
-				ReadKinds.DISK, ReadKinds.CACHE, ReadKinds.LUN,
-				ReadKinds.EXPORT, ReadKinds.UPS), complete().kinds(),
-				"a complete read names every kind but the world");
+	static void completeReadNamesEveryKind() {
+		T.eq(set(ReadKinds.WORLD, ReadKinds.DISKSTATION, ReadKinds.POOL,
+				ReadKinds.VOLUME, ReadKinds.DISK, ReadKinds.CACHE,
+				ReadKinds.LUN, ReadKinds.EXPORT, ReadKinds.UPS),
+				complete().kinds(), "a complete read names every kind");
 	}
 
 	/**
@@ -144,13 +144,14 @@ public final class ReadKindsTest {
 	}
 
 	private static final Set<String> LEGACY_MARKED = set(
-			ReadKinds.POOL + ":legacy", ReadKinds.VOLUME + ":legacy",
+			"world:legacy", ReadKinds.POOL + ":legacy", ReadKinds.VOLUME + ":legacy",
 			ReadKinds.DISK + ":legacy", ReadKinds.CACHE + ":legacy",
 			ReadKinds.LUN + ":legacy", ReadKinds.EXPORT + ":legacy");
 
 	/**
-	 * A complete read: every pre-build-34 orphan takes a miss and is marked
-	 * at the 12th cycle; the legacy World is excluded and stays.
+	 * A complete read: every pre-build-34 orphan, the legacy World among
+	 * them, takes a miss and is marked at the 12th cycle; the current World
+	 * is delivered every such cycle and never takes one.
 	 */
 	static void completeReadCountsMisses() {
 		Model m = new Model();
@@ -163,9 +164,15 @@ public final class ReadKindsTest {
 		T.check(m.marked.isEmpty(), "nothing marked before 12");
 		m.cycle(devel(), delivered(), complete().kinds());
 		T.eq(LEGACY_MARKED, m.marked,
-				"every legacy object but the World is marked at the 12th cycle");
-		T.check(!m.misses.containsKey("world:legacy")
-				&& !m.marked.contains("world:legacy"), "the legacy World is never counted");
+				"every legacy object, the old World too, is marked at the 12th cycle");
+		T.check(m.marked.contains("world:legacy"), "the legacy World is marked");
+		// Long after: the current World is still never counted or marked.
+		for (int i = 0; i < 30; i++) {
+			m.cycle(devel(), delivered(), complete().kinds());
+		}
+		T.check(!m.misses.containsKey("world:serial")
+				&& !m.marked.contains("world:serial"),
+				"the current World is never counted or marked");
 		for (String k : delivered()) {
 			T.check(!m.misses.containsKey(k), k + ": delivered, no miss");
 		}
@@ -255,9 +262,10 @@ public final class ReadKindsTest {
 	static void systemHealthReadFailureMarksNoDiskStation() {
 		ReadKinds r = complete();
 		r.systemHealth(false);
-		assertOnlyOut(r.kinds(), set(ReadKinds.DISKSTATION),
-				"SystemHealth unread: no DiskStation kind");
+		assertOnlyOut(r.kinds(), set(ReadKinds.WORLD, ReadKinds.DISKSTATION),
+				"SystemHealth unread: no DiskStation or World kind");
 		marksNothingOf(r.kinds(), ReadKinds.DISKSTATION, "no DiskStation counted");
+		marksNothingOf(r.kinds(), ReadKinds.WORLD, "no World counted");
 	}
 
 	/**
@@ -313,9 +321,20 @@ public final class ReadKindsTest {
 				"SSD caches are their own read");
 	}
 
-	static void worldIsExcluded() {
-		T.check(ReadKinds.EXCLUDED.contains(ReadKinds.WORLD), "World excluded");
-		T.check(!complete().kinds().contains(ReadKinds.WORLD), "World never named");
+	/**
+	 * Build 35 (devel proof): the World is not excluded, and is named
+	 * exactly when the DiskStation is, whatever else failed: it is
+	 * delivered from the DiskStation's read.
+	 */
+	static void worldCountedWithTheDiskStation() {
+		T.check(ReadKinds.EXCLUDED.isEmpty(), "nothing excluded");
+		T.check(complete().kinds().contains(ReadKinds.WORLD), "World named");
+		ReadKinds r = new ReadKinds();
+		r.systemHealth(true);
+		T.eq(set(ReadKinds.WORLD, ReadKinds.DISKSTATION), r.kinds(),
+				"every other read failed: World and DiskStation still named");
+		r = new ReadKinds();
+		T.check(r.kinds().isEmpty(), "nothing read: World not named");
 		T.check(ReadKinds.noId(null) && ReadKinds.noId("") && !ReadKinds.noId("x"),
 				"noId");
 	}
@@ -506,7 +525,7 @@ public final class ReadKindsTest {
 		ReadKinds c = new ReadKinds();
 		c.systemHealth(true);
 		c.storage(true, true, true, 1, 1, 7, 0, false);
-		T.eq(set(ReadKinds.DISKSTATION), c.kinds(),
+		T.eq(set(ReadKinds.WORLD, ReadKinds.DISKSTATION), c.kinds(),
 				"unassembledPools never called: no storage kind");
 		T.check(ReadKinds.noUnassembledPool(true, 0, true, 0), "both empty lists");
 		T.check(!ReadKinds.noUnassembledPool(true, 0, false, 0), "detected absent");

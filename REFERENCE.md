@@ -60,8 +60,8 @@ adapter instances (two NASes) never write into the same object.
   properties and is logged once at INFO. Up to build 34 VCF Operations
   showed it as Data Receiving with its last values frozen until it was
   deleted by hand. From build 35 it is marked Not Existing after 12 complete
-  cycles and deleted by retention, except a World (see Removed objects and
-  the README section Upgrading).
+  cycles and deleted by retention, an old World included (see Removed
+  objects and the README section Upgrading).
 
 ## Object Types
 
@@ -492,6 +492,7 @@ counts a miss (`ReadKinds`):
 
 | Kinds | Counted only when |
 |---|---|
+| World | the DiskStation is counted (the World is delivered from the same read; only a World not delivered, the pre-build-34 `Synology World`, takes a miss) |
 | Diskstation | `SYNO.Core.System.SystemHealth` was read too (the DiskStation itself comes from `SYNO.DSM.Info`, which every cycle needs) |
 | Storage Pool, Volume, Disk | storage `load_info` was complete: pools, volumes and disks each a list, at least one disk, every pool, volume and disk with its id (a volume's `volume_id`, else `vol_path`), and `missing_pools` and `detected_pools` both sent as lists and both empty. An empty pool or volume list counts only when both are empty and every disk states a `used_by` that is empty or a listed shared cache (no disk is in a pool). Pools also need every volume's `pool_path` to name a listed pool, and every disk's `used_by` to be empty, a listed pool or a listed shared cache. None of the three counts while `overview_data.space_affect_by_eunit_lost` is `true` or `incompatible_eunit` is non-empty (each when sent) |
 | SSD Cache | `load_info` sent `ssdCaches` as a list with an `id` on every cache, every volume's `cache.id` names a listed cache, no `sharedCaches` entry is `is_missing: true`, and no pool is missing or detected (as above). An empty list counts only when `sharedCaches` is an empty list, no volume has a `cache.id`, and every disk states a `used_by` that is empty or a listed pool |
@@ -559,8 +560,10 @@ an export is ERROR, not gone, and is not counted. A NAS without SAN Manager
 sends no LUN list (DSM error 102), so its LUNs are not counted either; delete
 leftover LUN objects by hand after removing SAN Manager. A cycle whose
 snapshot failed (a required endpoint, or the DiskStation identity) counts
-nothing at all. Synology World is never marked (`notExistingExcludedKinds`),
-so a World from before build 34 stays until deleted by hand. The counts are
+nothing at all. No kind is excluded (`notExistingExcludedKinds` is empty):
+the World is counted with the DiskStation, and the current World is
+registered first in every enumeration, so only a World the cycle did not
+deliver, the one from before build 34, takes a miss. The counts are
 held in memory, so a collector restart delays a mark and never makes one
 early. A marked object that comes back is registered again by discovery;
 that path is not yet seen live (framework note,
@@ -570,8 +573,10 @@ that path is not yet seen live (framework note,
 no longer produces is counted from the first cycle. On devel_9_1 and
 devel_8_18 (2026-10-28) that is 29 pre-build-34 objects with no
 `diskstation_id` each: 16 NFS exports, 7 disks, 2 iSCSI LUNs, 1 storage
-pool, 1 volume and 1 SSD cache, which are marked about 12 cycles after the
-upgrade, and the old `Synology World`, which is not.
+pool, 1 volume, 1 SSD cache and the old `Synology World`, all 29 marked
+about 12 cycles after the upgrade. Once the old World is deleted, the
+tree's duplicate root goes away (the DiskStation was a child of both
+Worlds).
 
 ---
 

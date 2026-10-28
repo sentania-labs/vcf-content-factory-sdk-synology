@@ -32,6 +32,10 @@ def hooks():
     body = method_body("Set<String>", "kindsReadThisCycle")
     assert "r.thread == Thread.currentThread()" in body, "answers for this thread only"
     assert "ReadKinds.EXCLUDED" in method_body("Set<String>", "notExistingExcludedKinds")
+    # Build 35 (devel proof): the World is not excluded; it is counted with
+    # the DiskStation, so the pre-build-34 World is marked.
+    rk = (ROOT / "src/com/vcfcf/adapters/synology/ReadKinds.java").read_text()
+    assert "static final Set<String> EXCLUDED = Collections.emptySet();" in rk
     for name in ("kindsReadThisCycle", "notExistingExcludedKinds"):
         assert re.search(r"@Override\s+protected Set<String> " + name, SRC), name
     # No threshold override: the framework default of 12 cycles stands.
@@ -48,6 +52,17 @@ def enumeration():
         "lastRead = new ReadRecord(Thread.currentThread(), read.kinds());"), tail[-120:]
     assert enum.count("lastRead = ") == 2
     assert "read.systemHealth(s.isRead(SnapshotReads.SYSTEM_HEALTH));" in enum
+    # The current World is registered unconditionally, first, right after
+    # the snapshot: whenever the World kind is declared, it was delivered.
+    world = ('sink.accept(rcOf("SynologyWorld", s.device.worldName(),\n'
+             '\t\t\t\t"world_id", "synology_world", dev));')
+    assert enum.count(world) == 1, "World registered once"
+    w = enum.index(world)
+    assert enum.index("currentSnapshot()") < w, "World after the snapshot"
+    assert enum.index("sink.accept(") == w, "World is the first resource registered"
+    pre = enum[enum.index("currentSnapshot()"):w]
+    assert not re.search(r"\b(if|for|while|return|switch|try)\b", pre), \
+        "nothing between the snapshot and the World can skip it"
     # Storage: the lists the walk iterated, the disk count it registered,
     # and every record without identity.
     assert enum.count("storageNoId++") == 3

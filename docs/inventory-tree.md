@@ -11,11 +11,14 @@
     - **Synology Storage Pool** (`SynologyStoragePool`)
       - **Synology Volume** (`SynologyVolume`)
         - **Synology iSCSI LUN** (`SynologyIscsiLun`)
-          - **Datastore** (`Datastore`)
         - **Synology NFS Export** (`SynologyNfsExport`)
         - **Synology SSD Cache** (`SynologySsdCache`)
           - **Synology Disk** (`SynologyDisk`)
+      - **Synology Disk** (`SynologyDisk`) *(see above)*
     - **Synology UPS** (`SynologyUps`)
+- **Datastore (VMWARE)** (`VMWARE::Datastore`)
+  - **Synology iSCSI LUN** (`SynologyIscsiLun`) *(see above)*
+  - **Synology NFS Export** (`SynologyNfsExport`) *(see above)*
 
 > \* = identifying (unique) key
 
@@ -28,8 +31,8 @@
 | `SynologyStoragePool` | Synology Storage Pool | `pool_id` *, `diskstation_id` * | Synology Diskstation |
 | `SynologyVolume` | Synology Volume | `volume_id` *, `diskstation_id` * | Synology Storage Pool |
 | `SynologyDisk` | Synology Disk | `disk_id` *, `diskstation_id` * | Synology SSD Cache, Synology Storage Pool |
-| `SynologyIscsiLun` | Synology iSCSI LUN | `lun_uuid` *, `diskstation_id` * | Synology Volume |
-| `SynologyNfsExport` | Synology NFS Export | `share_name` *, `diskstation_id` * | Synology Volume |
+| `SynologyIscsiLun` | Synology iSCSI LUN | `lun_uuid` *, `diskstation_id` * | Synology Volume, Datastore (VMWARE) |
+| `SynologyNfsExport` | Synology NFS Export | `share_name` *, `diskstation_id` * | Synology Volume, Datastore (VMWARE) |
 | `SynologyUps` | Synology UPS | `ups_model` *, `diskstation_id` * | Synology Diskstation |
 | `SynologySsdCache` | Synology SSD Cache | `cache_id` *, `diskstation_id` * | Synology Volume |
 

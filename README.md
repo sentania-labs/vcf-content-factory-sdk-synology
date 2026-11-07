@@ -356,4 +356,4 @@ before your own `v*` tags will build (it already runs on GitHub-hosted
 
 ## License
 
-MIT — see LICENSE in the VCF Content Factory repository.
+MIT, see `LICENSE` in this repository (the same license as the VCF Content Factory).
